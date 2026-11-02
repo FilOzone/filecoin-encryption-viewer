@@ -15,7 +15,7 @@ const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/
  * response's Content-Range, and the head bytes it carried are reused, so the header parse costs no extra request.
  */
 export async function openRangeSource(url: string, fetchFn: typeof fetch): Promise<RandomAccessSource> {
-  const first = await requestRange(url, fetchFn, 1, HEAD_BYTES - 1)
+  const first = await requestHead(url, fetchFn)
   const body = await readAll(first.body).catch((error) => {
     throw new NotAvailableError('The download was interrupted', { cause: error })
   })
@@ -45,6 +45,27 @@ export async function openRangeSource(url: string, fetchFn: typeof fetch): Promi
   }
 }
 
+const UNSATISFIED_RANGE = /^bytes \*\/(\d+)$/
+
+// Servers differ on a Range whose end is past the last byte: some clamp, dweb.link answers 416 with the size.
+// Probe with the full head window; on 416, read the size from Content-Range and ask again for exactly what exists.
+async function requestHead(url: string, fetchFn: typeof fetch) {
+  try {
+    return await requestRange(url, fetchFn, 1, HEAD_BYTES - 1)
+  } catch (error) {
+    if (!(error instanceof UnsatisfiableRangeError) || error.total <= 1) throw error
+    return requestRange(url, fetchFn, 1, Math.min(error.total, HEAD_BYTES) - 1)
+  }
+}
+
+class UnsatisfiableRangeError extends Error {
+  total: number
+  constructor(total: number) {
+    super('The server answered 416 to the head request')
+    this.total = total
+  }
+}
+
 async function requestRange(url: string, fetchFn: typeof fetch, offset: number, length: number) {
   let response: Response
   try {
@@ -63,6 +84,12 @@ async function requestRange(url: string, fetchFn: typeof fetch, offset: number, 
   if ([404, 502, 504].includes(response.status)) {
     await discard(response)
     throw new NotAvailableError('Share is not available yet')
+  }
+  if (response.status === 416) {
+    const total = UNSATISFIED_RANGE.exec(response.headers.get('content-range') ?? '')
+    await discard(response)
+    if (total) throw new UnsatisfiableRangeError(Number(total[1]))
+    throw new Error('Unexpected response: 416')
   }
   if (response.status !== 206) {
     await discard(response)
