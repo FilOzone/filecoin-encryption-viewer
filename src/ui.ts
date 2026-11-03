@@ -39,7 +39,11 @@ const features = () => `
 export const TOO_LARGE_MESSAGE = 'This file is too large to save in this browser. Use `filecoin-pin decrypt` instead.'
 const EMPTY_KEY_ERROR = 'Enter the Access key you received from the sender.'
 
-export function unlockErrorMessage(cause: unknown): string {
+/** The message for a known error class, else `fallback`. */
+export function unlockErrorMessage(
+  cause: unknown,
+  fallback = 'Something went wrong opening this share. Try again.'
+): string {
   if (cause instanceof WrongAccessKeyError) {
     return "That Access key doesn't open this share. Check it and try again."
   }
@@ -53,7 +57,7 @@ export function unlockErrorMessage(cause: unknown): string {
     return 'This link is damaged. Copy it again, or ask the sender for a new one.'
   }
   if (cause instanceof ShareModifiedError) {
-    return 'This share was modified after it was shared, so it was not opened.'
+    return 'This share is damaged or was modified, so it was not opened.'
   }
   if (cause instanceof NotAvailableError) {
     return "This share isn't available yet, or the download was interrupted. Try again in a few minutes."
@@ -67,7 +71,7 @@ export function unlockErrorMessage(cause: unknown): string {
   if (cause instanceof NotAShareError) {
     return "This link doesn't point to a filecoin-pin encrypted share."
   }
-  return 'Something went wrong opening this share. Try again.'
+  return fallback
 }
 
 /**
@@ -278,8 +282,8 @@ function createFileItem(
     error.hidden = true
     try {
       await onSelect(entry)
-    } catch {
-      error.textContent = 'This file could not be opened.'
+    } catch (cause) {
+      error.textContent = unlockErrorMessage(cause, 'This file could not be opened.')
       error.hidden = false
     } finally {
       if (button.isConnected) button.disabled = false
@@ -402,7 +406,7 @@ function wireDownloadAll(
       status.textContent =
         cause instanceof TooLargeError
           ? 'These files are too large to zip in this browser. Use `filecoin-pin decrypt` instead.'
-          : 'The zip could not be created. Try again.'
+          : unlockErrorMessage(cause, 'The zip could not be created. Try again.')
     } finally {
       button.disabled = false
       label.textContent = 'Download all'
@@ -465,7 +469,7 @@ export function showSaveEntry(
       status.textContent = result === 'saved' ? 'Saved.' : ''
     } catch (cause) {
       status.textContent = ''
-      error.textContent = cause instanceof TooLargeError ? TOO_LARGE_MESSAGE : 'This file could not be saved.'
+      error.textContent = unlockErrorMessage(cause, 'This file could not be saved.')
       error.hidden = false
     } finally {
       button.disabled = false

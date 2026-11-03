@@ -337,9 +337,17 @@ describe('integrity', () => {
     await expect(readAll(await archive.open('big/data.bin'))).rejects.toBeInstanceOf(ShareModifiedError)
   })
 
-  it.each([40, 70_000, 300_000])('maps a total cut by %i bytes to NotAvailableError', async (cut) => {
+  // The Content-Range total is fixed by the CID, so an envelope that doesn't match its header is final, not a retry
+  it.each([40, 70_000, 300_000])('maps a total cut by %i bytes to ShareModifiedError', async (cut) => {
     const share = await makeShare(bigFolder)
-    await expect(open(share.slice(0, share.length - cut))).rejects.toBeInstanceOf(NotAvailableError)
+    await expect(open(share.slice(0, share.length - cut))).rejects.toBeInstanceOf(ShareModifiedError)
+  })
+
+  it('maps a total with bytes appended to ShareModifiedError', async () => {
+    const share = await makeShare(bigFolder)
+    const longer = new Uint8Array(share.length + 40)
+    longer.set(share)
+    await expect(open(longer)).rejects.toBeInstanceOf(ShareModifiedError)
   })
 
   it('maps a body shorter than its Content-Range to NotAvailableError', async () => {

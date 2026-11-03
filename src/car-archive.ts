@@ -183,17 +183,19 @@ function pieceKeyFor(nodeKey: Uint8Array, appMetadata: fee.AppMetadata | undefin
 
 const { errors } = fee
 
-// Decision per fee.errors class. Unlisted classes (InvalidKeyError, InvalidPlaintextError, CryptoOperationError,
-// InvalidRangeError, base EnvelopeError) are programmer or platform errors and propagate unchanged.
+// Decision per fee.errors class. The length errors check the envelope against its own header and against the
+// Content-Range total, which the CID fixes, so they are permanent: the envelope is malformed. Only a range that ends
+// early (InvalidSourceLengthError) is worth retrying. Unlisted classes (InvalidKeyError, InvalidPlaintextError,
+// CryptoOperationError, InvalidRangeError, base EnvelopeError) are programmer or platform errors and propagate
+// unchanged.
 function mapError(error: unknown): unknown {
   if (error instanceof errors.AuthenticationError) {
     return new ShareModifiedError('The share was modified', { cause: error })
   }
-  if (
-    error instanceof errors.InvalidCiphertextLengthError ||
-    error instanceof errors.InvalidPlaintextLengthError ||
-    error instanceof errors.InvalidSourceLengthError
-  ) {
+  if (error instanceof errors.InvalidCiphertextLengthError || error instanceof errors.InvalidPlaintextLengthError) {
+    return new ShareModifiedError('The envelope does not match its header', { cause: error })
+  }
+  if (error instanceof errors.InvalidSourceLengthError) {
     return new NotAvailableError('The download was incomplete, try again', { cause: error })
   }
   if (

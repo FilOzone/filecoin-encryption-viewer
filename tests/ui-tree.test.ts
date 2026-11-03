@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProtectedEntry } from '../src/car-archive.js'
+import { NotAvailableError, ShareModifiedError, TooLargeError } from '../src/errors.js'
 import { addBackButton, showProtectedArchive } from '../src/ui.js'
 
 const dir = (path: string): ProtectedEntry => ({
@@ -92,6 +93,47 @@ describe('showProtectedArchive tree', () => {
     ;(container.querySelector('button.tree-file') as HTMLButtonElement).click()
     await Promise.resolve()
     expect(onSelect).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    [new ShareModifiedError('x'), 'This share is damaged or was modified, so it was not opened.'],
+    [
+      new NotAvailableError('x'),
+      "This share isn't available yet, or the download was interrupted. Try again in a few minutes.",
+    ],
+    [new Error('boom'), 'This file could not be opened.'],
+  ])('shows the message for %s when a file fails to open', async (cause, message) => {
+    showProtectedArchive(container, entries, async () => {
+      throw cause
+    })
+    ;(container.querySelector('button.tree-file') as HTMLButtonElement).click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const error = container.querySelector('#archive-error') as HTMLElement
+    expect(error.hidden).toBe(false)
+    expect(error.textContent).toBe(message)
+  })
+
+  it.each([
+    [new ShareModifiedError('x'), 'This share is damaged or was modified, so it was not opened.'],
+    [
+      new NotAvailableError('x'),
+      "This share isn't available yet, or the download was interrupted. Try again in a few minutes.",
+    ],
+    [new TooLargeError('x'), 'These files are too large to zip in this browser. Use `filecoin-pin decrypt` instead.'],
+    [new Error('boom'), 'The zip could not be created. Try again.'],
+  ])('shows the message for %s when the zip fails', async (cause, message) => {
+    showProtectedArchive(
+      container,
+      entries,
+      async () => {},
+      new Map(),
+      async () => {
+        throw cause
+      }
+    )
+    ;(container.querySelector('#download-all') as HTMLButtonElement).click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(container.querySelector('#zip-status')?.textContent).toBe(message)
   })
 
   it('adds a back button that calls the handler', () => {

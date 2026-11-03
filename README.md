@@ -92,7 +92,7 @@ With `k`, the viewer clears it from the address bar (keeping `d`) before it fetc
 | The payload is for another upload than the envelope at this CID | This link is for another upload |
 | The Delivery has expired | This share has expired |
 | The payload isn't a valid grant or Delivery, or a signature fails | This link is damaged |
-| A chunk fails authentication (the ciphertext was modified) | This share was modified |
+| A chunk fails authentication, or the envelope's length doesn't match its header (the ciphertext was modified or is damaged) | This share is damaged or was modified |
 | The envelope has no keysmith labels, or isn't what `add --encrypt` writes | This link doesn't point to a filecoin-pin encrypted share |
 
 No message names anything from inside the envelope.
