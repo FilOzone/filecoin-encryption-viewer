@@ -43,11 +43,11 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 | Can't be opened in the browser | Add `?ignore-range` before the `#` (`http://localhost:5173/?ignore-range#v1/<cid>&d=…`); the dev server then answers `200` with the whole file |
 | Incomplete link | Use any other fragment, for example `#nope` |
 
-The real path (the inbrowser.link service worker fetching `https://<cid>.ipfs.dweb.link/`) can only be tested on the published Viewer.
+The real path (the inbrowser.link service worker intercepting `https://<cid>.ipfs.inbrowser.link/` and fetching from storage providers; the host is never reached directly) can only be tested on the published Viewer.
 
 ## Rules
 
-- **The build is one self-contained HTML file.** No external requests except Range requests to `https://*.ipfs.dweb.link`. Don't add dependencies lightly, and keep everything inline.
+- **The build is one self-contained HTML file.** No external requests except Range requests to `https://*.ipfs.inbrowser.link`, which the service worker intercepts. Don't add dependencies lightly, and keep everything inline.
 - **Don't change the CSP** in `index.html` without a reason recorded next to it. `'self'` in `connect-src` is required for Firefox.
 - **Security invariants:**
   - every Download link is an `application/octet-stream` blob;

@@ -4,6 +4,7 @@
 export type StubMode = 'range' | 'full' | 'truncated' | 'strict' | number
 
 export interface RangeRequest {
+  url: string
   offset: number
   length: number
   cache?: RequestCache
@@ -20,12 +21,18 @@ export function serveRange(bytes: Uint8Array, mode: StubMode = 'range'): RangeSt
   const stub: RangeStub = {
     mode,
     requests: [],
-    fetch: (async (_input: unknown, init?: RequestInit) => {
+    fetch: (async (input: string | URL | Request, init?: RequestInit) => {
       const range = new Headers(init?.headers).get('range')?.match(/^bytes=(\d+)-(\d+)$/)
       if (!range) throw new Error('serveRange: expected a bytes=a-b Range header')
       const offset = Number(range[1])
       const end = Math.min(Number(range[2]), bytes.length - 1)
-      stub.requests.push({ offset, length: end - offset + 1, cache: init?.cache, redirect: init?.redirect })
+      stub.requests.push({
+        url: String(input),
+        offset,
+        length: end - offset + 1,
+        cache: init?.cache,
+        redirect: init?.redirect,
+      })
 
       if (typeof stub.mode === 'number') return new Response('', { status: stub.mode })
       if (stub.mode === 'strict' && Number(range[2]) > bytes.length - 1) {
