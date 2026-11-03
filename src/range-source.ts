@@ -47,7 +47,8 @@ export async function openRangeSource(url: string, fetchFn: typeof fetch): Promi
 
 const UNSATISFIED_RANGE = /^bytes \*\/(\d+)$/
 
-// Servers differ on a Range whose end is past the last byte: some clamp, dweb.link answers 416 with the size.
+// Servers differ on a Range whose end is past the last byte: some clamp, the gateway's service worker (verified-fetch)
+// answers 416 with the size.
 // Probe with the full head window; on 416, read the size from Content-Range and ask again for exactly what exists.
 async function requestHead(url: string, fetchFn: typeof fetch) {
   try {

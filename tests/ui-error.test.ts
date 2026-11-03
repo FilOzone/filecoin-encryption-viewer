@@ -18,7 +18,7 @@ describe('unlockErrorMessage', () => {
     [new OtherUploadError('x'), 'This link is for another upload. Ask the sender for the right link.'],
     [new ShareExpiredError('x'), 'This share has expired. Ask the sender for a new link.'],
     [new DamagedLinkError('x'), 'This link is damaged. Copy it again, or ask the sender for a new one.'],
-    [new ShareModifiedError('x'), 'This share was modified after it was shared, so it was not opened.'],
+    [new ShareModifiedError('x'), 'This share is damaged or was modified, so it was not opened.'],
   ])('maps %s', (error, message) => {
     expect(unlockErrorMessage(error)).toBe(message)
   })

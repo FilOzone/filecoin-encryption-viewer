@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { expect, it } from 'vitest'
 import type { ProtectedEntry } from '../src/car-archive.js'
+import { NotAvailableError, ShareModifiedError, TooLargeError } from '../src/errors.js'
 import { showSaveEntry } from '../src/ui.js'
 
 const entry: ProtectedEntry = {
@@ -55,4 +56,24 @@ it('resets quietly, with no error, when the save is cancelled', async () => {
   expect(container.querySelector('#save-status')?.textContent).toBe('')
   expect(button.disabled).toBe(false)
   expect(button.textContent).toBe('Download file')
+})
+
+it.each([
+  [new ShareModifiedError('x'), 'This share is damaged or was modified, so it was not opened.'],
+  [
+    new NotAvailableError('x'),
+    "This share isn't available yet, or the download was interrupted. Try again in a few minutes.",
+  ],
+  [new TooLargeError('x'), 'This file is too large to save in this browser. Use `filecoin-pin decrypt` instead.'],
+  [new Error('boom'), 'This file could not be saved.'],
+])('shows the message for %s when the save fails', async (cause, message) => {
+  const container = document.createElement('div')
+  showSaveEntry(container, entry, async () => {
+    throw cause
+  })
+  ;(container.querySelector('#save-entry') as HTMLButtonElement).click()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const error = container.querySelector('#save-error') as HTMLElement
+  expect(error.hidden).toBe(false)
+  expect(error.textContent).toBe(message)
 })

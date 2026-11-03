@@ -23,8 +23,8 @@ A single-file browser viewer for encrypted Filecoin uploads (`filecoin-pin add -
 
 A demo folder on the calibration network, shared with `filecoin-pin get-share-link`, in both kinds of link:
 
-- **[Open link](https://bafkreieqtmgxcmxqlv7qortnxrephitit3hcj4p4dvjfljm4tsqf5mwksq.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEEpYpt3hrdlaAnCiP4YiwKDXozDXfeemRczk0aEHp0rJVwu-5t6TszxNiCbk0qPTBAB0_fYIzUBWG6M3DYE7nkXAVMkxAhCxk_8kqJrukEBlgwSIRvPBRWpfeNsXJfJBjZ9GRZanVKk1AbL3wHJcGZKsJV0uY75TFJMK5Rjv1iLjRr&k=fak1_Qu3jLRHpui6T3_k7cvhr3F1uHugu16fETsJrN8MKCPk)**: carries its Access key, so it opens without a prompt.
-- **[Restricted link](https://bafkreieqtmgxcmxqlv7qortnxrephitit3hcj4p4dvjfljm4tsqf5mwksq.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEE7YM_C2ak6J1pHLoyjTIE3qtXUMO1ew0XpS7jJLUS2zACh0ktqF1KJbtNERiaZhknsGD-MwBAqT3UlyaMCYx3PgVMLGj6m6OtUqLU3T00BlgwvXMm9WJ9vCMblw_uiYFdAQgwrxkVxsbRJOT9I6g9UXHCfDZJQ11Il6Jz-u4p4oqR)**: asks for its Access key, `fak1_txekkuXRme36QrbqRN_uvG91DBa8OhpCJShw8MsJcEg`.
+- **[Open link](https://bafkreiarmlzfby6zdf2g6lppopnn2d35mpc2m73thored5w2yy2lfj42ce.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEEpYpt3hrdlaAnCiP4YiwKDXozDXfeemRczk0aEHp0rJVwu-5t6TszxNiCbk0qPTBAB0_fYIzUBWG6M3DYE7nkXAVMkxAhCxk_8kqJrukEBlgwSIRvPBRWpfeNsXJfJBjZ9GRZanVKk1AbL3wHJcGZKsJV0uY75TFJMK5Rjv1iLjRr&k=fak1_Qu3jLRHpui6T3_k7cvhr3F1uHugu16fETsJrN8MKCPk)**: carries its Access key, so it opens without a prompt.
+- **[Restricted link](https://bafkreiarmlzfby6zdf2g6lppopnn2d35mpc2m73thored5w2yy2lfj42ce.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEE7YM_C2ak6J1pHLoyjTIE3qtXUMO1ew0XpS7jJLUS2zACh0ktqF1KJbtNERiaZhknsGD-MwBAqT3UlyaMCYx3PgVMLGj6m6OtUqLU3T00BlgwvXMm9WJ9vCMblw_uiYFdAQgwrxkVxsbRJOT9I6g9UXHCfDZJQ11Il6Jz-u4p4oqR)**: asks for its Access key, `fak1_txekkuXRme36QrbqRN_uvG91DBa8OhpCJShw8MsJcEg`.
 
 > [!WARNING]
 > This Access key is public only because it's a demo. For a real share, send the Access key on a separate channel from the link, never next to it.
@@ -92,7 +92,7 @@ With `k`, the viewer clears it from the address bar (keeping `d`) before it fetc
 | The payload is for another upload than the envelope at this CID | This link is for another upload |
 | The Delivery has expired | This share has expired |
 | The payload isn't a valid grant or Delivery, or a signature fails | This link is damaged |
-| A chunk fails authentication (the ciphertext was modified) | This share was modified |
+| A chunk fails authentication, or the envelope's length doesn't match its header (the ciphertext was modified or is damaged) | This share is damaged or was modified |
 | The envelope has no keysmith labels, or isn't what `add --encrypt` writes | This link doesn't point to a filecoin-pin encrypted share |
 
 No message names anything from inside the envelope.
@@ -194,8 +194,7 @@ filecoin-pin add dist/index.html --dry-run   # prints the root CID without uploa
 
 | Commit | Viewer CID | Network |
 |---|---|---|
-| `85adb6b` | `bafkreibthn4gniz2rjyi6rpcqn6lavpbdgok3w5dj2zghou4hem4bfuiqa` | calibration (staging, v1 share links) |
-| `696709b` | `bafkreieqtmgxcmxqlv7qortnxrephitit3hcj4p4dvjfljm4tsqf5mwksq` | calibration (staging, v1 share links, inbrowser.link host) |
+| `d24751b` | `bafkreiarmlzfby6zdf2g6lppopnn2d35mpc2m73thored5w2yy2lfj42ce` | calibration (staging, v1 share links, distinct error messages) |
 
 ## Credits
 

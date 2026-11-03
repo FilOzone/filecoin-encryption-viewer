@@ -1,6 +1,7 @@
 // A fetch stub that serves `bytes` the way the gateway does: 206 with Content-Range for a Range request.
 // `mode` can be changed between requests; `requests` records what was asked for.
-// 'strict' answers 416 when the requested end is past the last byte, as dweb.link does, instead of clamping.
+// 'strict' answers 416 when the requested end is past the last byte, as the gateway's service worker does, instead of
+// clamping.
 export type StubMode = 'range' | 'full' | 'truncated' | 'strict' | number
 
 export interface RangeRequest {
