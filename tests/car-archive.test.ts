@@ -125,6 +125,14 @@ describe('range reads', () => {
     { path: 'mix/small.txt', content: bytes('small file') },
   ]
 
+  it('opens a share smaller than the head window from a server that answers 416 instead of clamping', async () => {
+    const { stub, archive } = await open(await makeShare(folder), 'strict')
+    expect(archive.list().map((entry) => entry.path)).toContain('photos/a.jpg')
+    expect(await readAll(await archive.open('photos/a.jpg'))).toEqual(bytes('jpeg bytes'))
+    // One probe answered 416, then one clamped head read; nothing starts at byte 0
+    expect(stub.requests.every((request) => request.offset >= 1)).toBe(true)
+  })
+
   it('open fetches only the head', async () => {
     const { stub } = await open(await makeShare(mixed))
     expect(stub.requests).toHaveLength(1)
@@ -145,11 +153,16 @@ describe('range reads', () => {
     expect(requested(stub, beforeBig)).toBeGreaterThanOrEqual(big.length - 320 * 1024)
   })
 
-  it('sends every request with no-store and redirect error', async () => {
+  it("sends every request to the gateway's own host with no-store and redirect error", async () => {
     const { archive, stub } = await open(await makeShare(mixed))
     await readAll(await archive.open('mix/big.bin'))
     expect(stub.requests.length).toBeGreaterThan(1)
-    for (const request of stub.requests) expect(request).toMatchObject({ cache: 'no-store', redirect: 'error' })
+    for (const request of stub.requests)
+      expect(request).toMatchObject({
+        url: `https://${CID_STRING}.ipfs.inbrowser.link/`,
+        cache: 'no-store',
+        redirect: 'error',
+      })
   })
 
   it('sniffing the first 100 bytes of a large file makes one request of at most one batch', async () => {

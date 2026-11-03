@@ -97,7 +97,9 @@ export async function openProtectedArchive(
   let nodeKey: Uint8Array | undefined = opened.key
   let key: Uint8Array | undefined
   try {
-    const source = await openRangeSource(`https://${cid}.ipfs.dweb.link/`, fetchFn)
+    // inbrowser.link's service worker answers this from storage providers; if it doesn't, the request goes to the
+    // gateway that already serves the Viewer, not a third party
+    const source = await openRangeSource(`https://${cid}.ipfs.inbrowser.link/`, fetchFn)
     const info = await fee.parse(source)
     if (info.scheme !== 'chunked' || info.contentType !== CAR_CONTENT_TYPE || !info.params.plaintextLength) {
       throw new NotAShareError()
