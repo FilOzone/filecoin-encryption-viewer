@@ -145,11 +145,16 @@ describe('range reads', () => {
     expect(requested(stub, beforeBig)).toBeGreaterThanOrEqual(big.length - 320 * 1024)
   })
 
-  it('sends every request with no-store and redirect error', async () => {
+  it("sends every request to the gateway's own host with no-store and redirect error", async () => {
     const { archive, stub } = await open(await makeShare(mixed))
     await readAll(await archive.open('mix/big.bin'))
     expect(stub.requests.length).toBeGreaterThan(1)
-    for (const request of stub.requests) expect(request).toMatchObject({ cache: 'no-store', redirect: 'error' })
+    for (const request of stub.requests)
+      expect(request).toMatchObject({
+        url: `https://${CID_STRING}.ipfs.inbrowser.link/`,
+        cache: 'no-store',
+        redirect: 'error',
+      })
   })
 
   it('sniffing the first 100 bytes of a large file makes one request of at most one batch', async () => {

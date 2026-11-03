@@ -97,7 +97,7 @@ With `k`, the viewer clears it from the address bar (keeping `d`) before it fetc
 
 No message names anything from inside the envelope.
 
-The viewer fetches `https://<encrypted-root-cid>.ipfs.dweb.link/` with HTTP Range requests. inbrowser.link's service worker intercepts that request and serves it from the storage providers through IPNI, so the viewer only works when opened at an inbrowser.link origin. A share opened before IPNI has caught up shows "not available yet".
+The viewer fetches `https://<encrypted-root-cid>.ipfs.inbrowser.link/` with HTTP Range requests. inbrowser.link's service worker intercepts that request (the host is never reached directly) and serves it from the storage providers through IPNI, so the viewer only works when opened at an inbrowser.link origin. A share opened before IPNI has caught up shows "not available yet".
 
 ## Encryption format
 
