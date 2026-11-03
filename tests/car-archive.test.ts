@@ -125,6 +125,14 @@ describe('range reads', () => {
     { path: 'mix/small.txt', content: bytes('small file') },
   ]
 
+  it('opens a share smaller than the head window from a server that answers 416 instead of clamping', async () => {
+    const { stub, archive } = await open(await makeShare(folder), 'strict')
+    expect(archive.list().map((entry) => entry.path)).toContain('photos/a.jpg')
+    expect(await readAll(await archive.open('photos/a.jpg'))).toEqual(bytes('jpeg bytes'))
+    // One probe answered 416, then one clamped head read; nothing starts at byte 0
+    expect(stub.requests.every((request) => request.offset >= 1)).toBe(true)
+  })
+
   it('open fetches only the head', async () => {
     const { stub } = await open(await makeShare(mixed))
     expect(stub.requests).toHaveLength(1)

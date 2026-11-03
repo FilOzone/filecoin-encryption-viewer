@@ -1,6 +1,7 @@
 // A fetch stub that serves `bytes` the way the gateway does: 206 with Content-Range for a Range request.
 // `mode` can be changed between requests; `requests` records what was asked for.
-export type StubMode = 'range' | 'full' | 'truncated' | number
+// 'strict' answers 416 when the requested end is past the last byte, as dweb.link does, instead of clamping.
+export type StubMode = 'range' | 'full' | 'truncated' | 'strict' | number
 
 export interface RangeRequest {
   offset: number
@@ -27,6 +28,9 @@ export function serveRange(bytes: Uint8Array, mode: StubMode = 'range'): RangeSt
       stub.requests.push({ offset, length: end - offset + 1, cache: init?.cache, redirect: init?.redirect })
 
       if (typeof stub.mode === 'number') return new Response('', { status: stub.mode })
+      if (stub.mode === 'strict' && Number(range[2]) > bytes.length - 1) {
+        return new Response('', { status: 416, headers: { 'content-range': `bytes */${bytes.length}` } })
+      }
       if (stub.mode === 'full') {
         return new Response(bytes as BodyInit, { status: 200, headers: { 'content-length': String(bytes.length) } })
       }
