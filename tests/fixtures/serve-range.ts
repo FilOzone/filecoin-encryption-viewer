@@ -1,8 +1,9 @@
 // A fetch stub that serves `bytes` the way the gateway does: 206 with Content-Range for a Range request.
 // `mode` can be changed between requests; `requests` records what was asked for.
 // 'strict' answers 416 when the requested end is past the last byte, as the gateway's service worker does, instead of
-// clamping.
-export type StubMode = 'range' | 'full' | 'truncated' | 'strict' | number
+// clamping. 'installer' answers like inbrowser.link's server without its service worker: 200 with an HTML page;
+// `installerPages` counts them and `installerCancels` how many bodies were cancelled.
+export type StubMode = 'range' | 'full' | 'truncated' | 'strict' | 'installer' | number
 
 export interface RangeRequest {
   url: string
@@ -16,12 +17,16 @@ export interface RangeStub {
   fetch: typeof fetch
   mode: StubMode
   requests: RangeRequest[]
+  installerPages: number
+  installerCancels: number
 }
 
 export function serveRange(bytes: Uint8Array, mode: StubMode = 'range'): RangeStub {
   const stub: RangeStub = {
     mode,
     requests: [],
+    installerPages: 0,
+    installerCancels: 0,
     fetch: (async (input: string | URL | Request, init?: RequestInit) => {
       const range = new Headers(init?.headers).get('range')?.match(/^bytes=(\d+)-(\d+)$/)
       if (!range) throw new Error('serveRange: expected a bytes=a-b Range header')
@@ -38,6 +43,14 @@ export function serveRange(bytes: Uint8Array, mode: StubMode = 'range'): RangeSt
       if (typeof stub.mode === 'number') return new Response('', { status: stub.mode })
       if (stub.mode === 'strict' && Number(range[2]) > bytes.length - 1) {
         return new Response('', { status: 416, headers: { 'content-range': `bytes */${bytes.length}` } })
+      }
+      if (stub.mode === 'installer') {
+        stub.installerPages++
+        const page = new ReadableStream({
+          pull: (controller) => controller.enqueue(new TextEncoder().encode('<!doctype html>')),
+          cancel: () => void stub.installerCancels++,
+        })
+        return new Response(page, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
       }
       if (stub.mode === 'full') {
         return new Response(bytes as BodyInit, { status: 200, headers: { 'content-length': String(bytes.length) } })

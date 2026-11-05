@@ -18,6 +18,7 @@ import {
   openProtectedArchive,
 } from '../src/car-archive.js'
 import type { ProtectedArchive } from '../src/car-archive.js'
+import { GatewayInactiveError, UnexpectedPageError } from '../src/errors.js'
 import { encodeVarint } from '../src/unixfs-car-layout.js'
 import { expectSameBytes } from './fixtures/bytes.js'
 import {
@@ -431,6 +432,25 @@ describe('what is accepted', () => {
       new Uint8Array([3, 7, 7, 7]),
     ] as BlobPart[]).arrayBuffer()
     await expect(open(await encryptCar(new Uint8Array(car)))).rejects.toBeInstanceOf(NotAShareError)
+  })
+})
+
+describe('when a web page comes back instead of the share (200 text/html)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('blames the gateway only when no service worker controls the tab', async () => {
+    const stub = serveRange(await makeShare(folder), 'installer')
+    const error = await openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), stub.fetch).catch((cause) => cause)
+    expect(error).toBeInstanceOf(GatewayInactiveError)
+    expect(stub.installerCancels).toBe(stub.installerPages)
+  })
+
+  it('says only that a page came back when a service worker is in control', async () => {
+    vi.stubGlobal('navigator', { serviceWorker: { controller: {} } })
+    const stub = serveRange(await makeShare(folder), 'installer')
+    const error = await openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), stub.fetch).catch((cause) => cause)
+    expect(error).toBeInstanceOf(UnexpectedPageError)
+    expect(stub.installerCancels).toBe(stub.installerPages)
   })
 })
 
