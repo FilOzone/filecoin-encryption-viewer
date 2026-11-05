@@ -435,10 +435,43 @@ describe('what is accepted', () => {
 })
 
 describe('when the server does not serve ranges', () => {
-  it('turns a 200 on the head request into RangeUnsupportedError, with the body intact', async () => {
+  it('opens a share served whole with a 200, reading everything from that one response', async () => {
+    const share = await makeShare(bigFolder)
+    const { archive, stub } = await open(share, 'full')
+    expect(archive.list().map((entry) => entry.path)).toEqual(['big/', 'big/data.bin'])
+    expectSameBytes(await readAll(await archive.open('big/data.bin')), big)
+    expect(stub.requests).toHaveLength(1)
+  })
+
+  it('reports a whole 200 body that does not start with 0xd0 as not a share', async () => {
     const share = await makeShare(folder)
-    const error = await open(share, 'full').catch((cause) => cause)
+    share[0] = 0x00
+    await expect(open(share, 'full')).rejects.toBeInstanceOf(NotAShareError)
+  })
+
+  it('reports a whole 200 body shorter than its Content-Length as not available', async () => {
+    const share = await makeShare(folder)
+    const headers = { 'content-length': String(share.length + 1) }
+    const fetchFn = (async () => new Response(share as BodyInit, { status: 200, headers })) as typeof fetch
+    await expect(openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn)).rejects.toBeInstanceOf(
+      NotAvailableError
+    )
+  })
+
+  it('turns a 200 without Content-Length on the head request into RangeUnsupportedError, with the body intact', async () => {
+    const share = await makeShare(folder)
+    const error = await open(share, 'chunked').catch((cause) => cause)
     expect(error).toBeInstanceOf(RangeUnsupportedError)
+    expectSameBytes(new Uint8Array(await error.response.arrayBuffer()), share)
+  })
+
+  it('leaves the body of a 200 over the in-memory cap unread', async () => {
+    const share = await makeShare(folder)
+    const headers = { 'content-length': String(64 * MIB + 1) }
+    const fetchFn = (async () => new Response(share as BodyInit, { status: 200, headers })) as typeof fetch
+    const error = await openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn).catch((cause) => cause)
+    expect(error).toBeInstanceOf(RangeUnsupportedError)
+    expect(error.response.bodyUsed).toBe(false)
     expectSameBytes(new Uint8Array(await error.response.arrayBuffer()), share)
   })
 
