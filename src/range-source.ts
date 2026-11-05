@@ -6,12 +6,11 @@ import {
   RangeUnsupportedError,
   UnexpectedPageError,
 } from './errors.js'
+import { saveFallbackCap } from './save.js'
 
 // Covers the envelope header plus the first metadata window, so opening costs one request when the metadata is small
 const HEAD_BYTES = 320 * 1024
 const COSE_ENCRYPT0_TAG_BYTE = 0xd0
-// Bounds the memory a whole-body 200 can take; matches the binary preview cap
-const MAX_WHOLE_BODY_BYTES = 64 * 1024 * 1024
 const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/
 
 // ponytail: never request byte 0: the gateway's service worker sniffs ranges that start at 0 by walking the whole file
@@ -66,20 +65,47 @@ export async function openRangeSource(url: string, fetchFn: typeof fetch): Promi
 async function wholeBodySource(error: RangeUnsupportedError): Promise<RandomAccessSource> {
   const declared = error.response.headers.get('content-length')
   const size = Number(declared)
-  if (!/^\d+$/.test(declared ?? '') || size > MAX_WHOLE_BODY_BYTES) throw error
-  let body: Uint8Array
-  try {
-    if (!error.response.body) throw new Error('The response has no body')
-    body = await readAll(error.response.body, size)
-  } catch (cause) {
-    throw new NotAvailableError('The download was interrupted', { cause })
-  }
-  if (body.length !== size) throw new NotAvailableError('The download was incomplete')
+  if (!/^\d+$/.test(declared ?? '') || size > wholeBodyCap()) throw error
+  if (!error.response.body) throw new NotAvailableError('The response has no body')
+  const body = await readDeclared(error.response.body, size)
   if (body[0] !== COSE_ENCRYPT0_TAG_BYTE) throw new NotAShareError()
   return {
     size,
     openRange: async (offset, length) => streamOf(body.subarray(offset, offset + length)),
   }
+}
+
+/**
+ * The largest whole body kept in memory: half the in-memory save cap (256 MiB on desktop, 128 MiB on mobile). The body
+ * stays for as long as the share is open, next to whatever a save needs, so it gets half of the measured budget.
+ */
+export function wholeBodyCap(): number {
+  return saveFallbackCap() / 2
+}
+
+// Fills one buffer of the declared size as chunks arrive, so the body costs its size once, not twice. A body that
+// stops short, or runs past its declared size, is reported as an incomplete download.
+async function readDeclared(stream: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
+  const out = new Uint8Array(size)
+  const reader = stream.getReader()
+  let at = 0
+  for (;;) {
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch (cause) {
+      throw new NotAvailableError('The download was interrupted', { cause })
+    }
+    if (chunk.done) break
+    if (chunk.value.length > size - at) {
+      await reader.cancel().catch(() => undefined)
+      throw new NotAvailableError('The download was longer than declared')
+    }
+    out.set(chunk.value, at)
+    at += chunk.value.length
+  }
+  if (at !== size) throw new NotAvailableError('The download was incomplete')
+  return out
 }
 
 const UNSATISFIED_RANGE = /^bytes \*\/(\d+)$/
@@ -177,8 +203,7 @@ function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
   })
 }
 
-// Stops once more than `max` bytes have arrived, so a body longer than declared can't grow without bound
-async function readAll(stream: ReadableStream<Uint8Array>, max = Number.POSITIVE_INFINITY): Promise<Uint8Array> {
+async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
   const reader = stream.getReader()
   const parts: Uint8Array[] = []
   let length = 0
@@ -187,10 +212,6 @@ async function readAll(stream: ReadableStream<Uint8Array>, max = Number.POSITIVE
     if (done) break
     parts.push(value)
     length += value.length
-    if (length > max) {
-      await reader.cancel().catch(() => undefined)
-      break
-    }
   }
   const out = new Uint8Array(length)
   let at = 0

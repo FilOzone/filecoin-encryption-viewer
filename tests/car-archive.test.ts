@@ -19,6 +19,7 @@ import {
 } from '../src/car-archive.js'
 import type { ProtectedArchive } from '../src/car-archive.js'
 import { GatewayInactiveError, UnexpectedPageError } from '../src/errors.js'
+import { wholeBodyCap } from '../src/range-source.js'
 import { encodeVarint } from '../src/unixfs-car-layout.js'
 import { expectSameBytes } from './fixtures/bytes.js'
 import {
@@ -469,6 +470,24 @@ describe('when the server does not serve ranges', () => {
     await expect(open(share, 'full')).rejects.toBeInstanceOf(NotAShareError)
   })
 
+  it('reports a whole 200 body longer than its Content-Length as not available, and stops reading it', async () => {
+    const share = await makeShare(folder)
+    const headers = { 'content-length': String(share.length - 1) }
+    const response = new Response(share as BodyInit, { status: 200, headers })
+    const fetchFn = (async () => response) as typeof fetch
+    await expect(openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn)).rejects.toBeInstanceOf(
+      NotAvailableError
+    )
+  })
+
+  it('caps the whole body at half the in-memory save cap: 256 MiB on desktop, 128 MiB on mobile', () => {
+    vi.stubGlobal('navigator', { userAgentData: { mobile: false } })
+    expect(wholeBodyCap()).toBe(256 * 1024 * 1024)
+    vi.stubGlobal('navigator', { userAgentData: { mobile: true } })
+    expect(wholeBodyCap()).toBe(128 * 1024 * 1024)
+    vi.unstubAllGlobals()
+  })
+
   it('reports a whole 200 body shorter than its Content-Length as not available', async () => {
     const share = await makeShare(folder)
     const headers = { 'content-length': String(share.length + 1) }
@@ -487,7 +506,7 @@ describe('when the server does not serve ranges', () => {
 
   it('leaves the body of a 200 over the in-memory cap unread', async () => {
     const share = await makeShare(folder)
-    const headers = { 'content-length': String(64 * MIB + 1) }
+    const headers = { 'content-length': String(wholeBodyCap() + 1) }
     const fetchFn = (async () => new Response(share as BodyInit, { status: 200, headers })) as typeof fetch
     const error = await openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn).catch((cause) => cause)
     expect(error).toBeInstanceOf(RangeUnsupportedError)

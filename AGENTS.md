@@ -40,8 +40,8 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 | Wrong Access key | Enter any other `fak1_` key, or change a character of the printed one |
 | Prompt-side checks | Paste a Share link, a `fgr1_` Grant, or a key without its prefix |
 | Not available | Delete `dev/share.fee`, then submit |
-| Share served whole | Add `?ignore-range` before the `#` (`http://localhost:5173/?ignore-range#v1/<cid>&d=…`); the dev server then answers `200` with the whole file and its `Content-Length`, and a share up to 64 MiB opens from that one response |
-| Can't be opened in the browser | Add `?ignore-range=chunked` instead; the `200` then has no `Content-Length` (as over 64 MiB), so the viewer offers the body as `encrypted.fee` |
+| Share served whole | Add `?ignore-range` before the `#` (`http://localhost:5173/?ignore-range#v1/<cid>&d=…`); the dev server then answers `200` with the whole file and its `Content-Length`, and a share up to 256 MiB opens from that one response |
+| Can't be opened in the browser | Add `?ignore-range=chunked` instead; the `200` then has no `Content-Length` (as over the in-memory cap), so the viewer offers the body as `encrypted.fee` |
 | Incomplete link | Use any other fragment, for example `#nope` |
 
 The real path (the inbrowser.link service worker intercepting `https://<cid>.ipfs.inbrowser.link/` and fetching from storage providers; the host is never reached directly) can only be tested on the published Viewer.

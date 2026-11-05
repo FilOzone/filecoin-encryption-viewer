@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatBytes } from '../src/format.js'
+import { wholeBodyCap } from '../src/range-source.js'
 import { expectSameBytes } from './fixtures/bytes.js'
 import { stubOpfs } from './fixtures/fake-opfs.js'
 import { ACCESS_KEY_TEXT, LINK_DATA, makeShare } from './fixtures/make-share.js'
@@ -80,7 +81,7 @@ describe('range ignored by the server', () => {
 
   it('shows the state with the size when Content-Length is over the in-memory cap, leaving the body unread', async () => {
     const share = await makeShare(folder)
-    const declared = 64 * 1024 * 1024 + 1
+    const declared = wholeBodyCap() + 1
     const response = new Response(share as BodyInit, { status: 200, headers: { 'content-length': String(declared) } })
     vi.stubGlobal('fetch', async () => response)
 
