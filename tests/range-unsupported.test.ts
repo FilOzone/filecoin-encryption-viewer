@@ -186,3 +186,38 @@ describe('range ignored by the server', () => {
     expect(app().querySelector('h1')?.textContent).toBe("This share can't be opened in the browser")
   })
 })
+
+const INACTIVE = "This page isn't connected to the Filecoin gateway yet. Open the link again, or reload the page."
+
+describe("the gateway's installer page (200 text/html)", () => {
+  it('shows the gateway message at unlock, cancels the page and offers no encrypted.fee', async () => {
+    const stub = serveRange(await makeShare(folder), 'installer')
+    vi.stubGlobal('fetch', stub.fetch)
+
+    await openPage()
+    await waitFor(() => app().querySelector<HTMLElement>('#error')?.textContent === INACTIVE)
+
+    expect(stub.installerPages).toBeGreaterThan(0)
+    expect(stub.installerCancels).toBe(stub.installerPages)
+    expect(saveButton()).toBeNull()
+  })
+
+  it('shows the gateway message when opening a file after unlock', async () => {
+    const stub = serveRange(await makeShare(folder))
+    vi.stubGlobal('fetch', stub.fetch)
+
+    await openPage()
+    const file = await waitFor(() =>
+      Array.from(app().querySelectorAll<HTMLButtonElement>('button.tree-file')).find((b) =>
+        b.textContent?.includes('big.bin')
+      )
+    )
+    stub.mode = 'installer'
+    file.click()
+
+    await waitFor(() => app().textContent?.includes(INACTIVE))
+    expect(stub.installerPages).toBeGreaterThan(0)
+    expect(stub.installerCancels).toBe(stub.installerPages)
+    expect(saveButton()).toBeNull()
+  })
+})

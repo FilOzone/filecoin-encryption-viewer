@@ -2,6 +2,7 @@ import type { ProtectedEntry } from './car-archive.js'
 import { clearCardLabel, setCardLabel } from './card-label.js'
 import {
   DamagedLinkError,
+  GatewayInactiveError,
   NotAShareError,
   NotAvailableError,
   OtherUploadError,
@@ -61,6 +62,9 @@ export function unlockErrorMessage(
   }
   if (cause instanceof NotAvailableError) {
     return "This share isn't available yet, or the download was interrupted. Try again in a few minutes."
+  }
+  if (cause instanceof GatewayInactiveError) {
+    return "This page isn't connected to the Filecoin gateway yet. Open the link again, or reload the page."
   }
   if (cause instanceof TooLargeError) {
     return TOO_LARGE_MESSAGE

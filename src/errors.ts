@@ -35,6 +35,11 @@ export class NotAShareError extends Error {
   }
 }
 
+/** The gateway's service worker isn't active in this tab, so its server answered with the installer page. */
+export class GatewayInactiveError extends Error {
+  override name = 'GatewayInactiveError'
+}
+
 /** The server answered a Range request with a 200. `response` is unread, so its body can still be saved. */
 export class RangeUnsupportedError extends Error {
   override name = 'RangeUnsupportedError'

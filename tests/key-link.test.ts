@@ -112,6 +112,16 @@ describe('a link that carries its Access key', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 
+  it("shows the gateway's installer page as final: its message and no Try again", async () => {
+    vi.stubGlobal('fetch', serveRange(await makeShare(files), 'installer').fetch)
+    await openPage(`#v1/${CID}&d=${LINK_DATA}&k=${ACCESS_KEY_TEXT}`)
+    await waitFor(() => app().querySelector('#link-error'))
+    expect(app().querySelector('#link-error')?.textContent).toBe(
+      "This page isn't connected to the Filecoin gateway yet. Open the link again, or reload the page."
+    )
+    expect(app().querySelector('#retry-btn')).toBeNull()
+  })
+
   it('offers Try again with the same key when the share is not available yet, then zeroes the kept key', async () => {
     const stub = serveRange(await makeShare(files), 504)
     vi.stubGlobal('fetch', stub.fetch)
