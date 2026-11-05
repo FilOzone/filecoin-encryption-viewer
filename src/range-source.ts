@@ -1,5 +1,11 @@
 import type { RandomAccessSource } from 'filecoin-encryption-envelope'
-import { GatewayInactiveError, NotAShareError, NotAvailableError, RangeUnsupportedError } from './errors.js'
+import {
+  GatewayInactiveError,
+  NotAShareError,
+  NotAvailableError,
+  RangeUnsupportedError,
+  UnexpectedPageError,
+} from './errors.js'
 
 // Covers the envelope header plus the first metadata window, so opening costs one request when the metadata is small
 const HEAD_BYTES = 320 * 1024
@@ -110,10 +116,14 @@ async function requestRange(url: string, fetchFn: typeof fetch, offset: number, 
   } catch (error) {
     throw new NotAvailableError('Share is not available yet', { cause: error })
   }
-  // Without its service worker, inbrowser.link's server answers every request with its HTML installer page
+  // A share is never HTML (an envelope starts with 0xd0). With no service worker controlling this tab the request
+  // reached inbrowser.link's server, which answers with its installer page; otherwise we can't tell who sent the page
   if (response.status === 200 && response.headers.get('content-type')?.startsWith('text/html')) {
     await discard(response)
-    throw new GatewayInactiveError('The gateway answered with its installer page')
+    if (!globalThis.navigator?.serviceWorker?.controller) {
+      throw new GatewayInactiveError('No service worker controls this tab')
+    }
+    throw new UnexpectedPageError('A web page came back instead of the share')
   }
   // The content exists but can't be read in parts; the caller keeps the response so its body can still be saved
   if (response.status === 200) throw new RangeUnsupportedError(response)
