@@ -10,6 +10,7 @@ import {
   ShareModifiedError,
   TooLargeError,
   TooManyEntriesError,
+  UnexpectedPageError,
   WrongAccessKeyError,
 } from './errors.js'
 import { fileTypeLabel } from './file-type.js'
@@ -65,6 +66,9 @@ export function unlockErrorMessage(
   }
   if (cause instanceof GatewayInactiveError) {
     return "This page isn't connected to the Filecoin gateway yet. Open the link again, or reload the page."
+  }
+  if (cause instanceof UnexpectedPageError) {
+    return 'A web page came back instead of this share. Try again later, or open the link on another network.'
   }
   if (cause instanceof TooLargeError) {
     return TOO_LARGE_MESSAGE

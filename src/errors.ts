@@ -35,9 +35,13 @@ export class NotAShareError extends Error {
   }
 }
 
-/** The gateway's service worker isn't active in this tab, so its server answered with the installer page. */
+/** No service worker controls this tab, so the request reached inbrowser.link's server, which answers with its installer page. */
 export class GatewayInactiveError extends Error {
   override name = 'GatewayInactiveError'
+}
+/** A web page came back instead of the share, with the gateway's service worker in control: a captive portal, a proxy. */
+export class UnexpectedPageError extends Error {
+  override name = 'UnexpectedPageError'
 }
 
 /** The server answered a Range request with a 200. `response` is unread, so its body can still be saved. */

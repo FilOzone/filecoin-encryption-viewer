@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DamagedLinkError,
+  GatewayInactiveError,
   NotAShareError,
   NotAvailableError,
   OtherUploadError,
@@ -8,6 +9,7 @@ import {
   ShareModifiedError,
   TooLargeError,
   TooManyEntriesError,
+  UnexpectedPageError,
   WrongAccessKeyError,
 } from '../src/errors.js'
 import { unlockErrorMessage } from '../src/ui.js'
@@ -19,6 +21,14 @@ describe('unlockErrorMessage', () => {
     [new ShareExpiredError('x'), 'This share has expired. Ask the sender for a new link.'],
     [new DamagedLinkError('x'), 'This link is damaged. Copy it again, or ask the sender for a new one.'],
     [new ShareModifiedError('x'), 'This share is damaged or was modified, so it was not opened.'],
+    [
+      new GatewayInactiveError('x'),
+      "This page isn't connected to the Filecoin gateway yet. Open the link again, or reload the page.",
+    ],
+    [
+      new UnexpectedPageError('x'),
+      'A web page came back instead of this share. Try again later, or open the link on another network.',
+    ],
   ])('maps %s', (error, message) => {
     expect(unlockErrorMessage(error)).toBe(message)
   })
