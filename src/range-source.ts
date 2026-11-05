@@ -1,5 +1,12 @@
 import type { RandomAccessSource } from 'filecoin-encryption-envelope'
-import { GatewayInactiveError, NotAvailableError, RangeUnsupportedError, UnexpectedPageError } from './errors.js'
+import {
+  GatewayInactiveError,
+  NotAShareError,
+  NotAvailableError,
+  RangeUnsupportedError,
+  UnexpectedPageError,
+} from './errors.js'
+import { saveFallbackCap } from './save.js'
 
 // Covers the envelope header plus the first metadata window, so opening costs one request when the metadata is small
 const HEAD_BYTES = 320 * 1024
@@ -15,7 +22,13 @@ const CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+)$/
  * response's Content-Range, and the head bytes it carried are reused, so the header parse costs no extra request.
  */
 export async function openRangeSource(url: string, fetchFn: typeof fetch): Promise<RandomAccessSource> {
-  const first = await requestHead(url, fetchFn)
+  let first: Awaited<ReturnType<typeof requestHead>>
+  try {
+    first = await requestHead(url, fetchFn)
+  } catch (error) {
+    if (!(error instanceof RangeUnsupportedError)) throw error
+    return wholeBodySource(error)
+  }
   const body = await readAll(first.body).catch((error) => {
     throw new NotAvailableError('The download was interrupted', { cause: error })
   })
@@ -43,6 +56,56 @@ export async function openRangeSource(url: string, fetchFn: typeof fetch): Promi
       return offset < head.length ? prepend(head.subarray(offset), response.body) : response.body
     },
   }
+}
+
+// A 200 to the head read may be the whole envelope: the gateway's service worker reusing a cached full response, or a
+// server that ignores Range. If it plausibly is, keep it and serve every range from memory; otherwise rethrow with the
+// body unread so it can still be saved. The source needs no checking: FEE authenticates the header and every chunk
+// with the key, so a body from any path can't be altered undetected.
+async function wholeBodySource(error: RangeUnsupportedError): Promise<RandomAccessSource> {
+  const declared = error.response.headers.get('content-length')
+  const size = Number(declared)
+  if (!/^\d+$/.test(declared ?? '') || size > wholeBodyCap()) throw error
+  if (!error.response.body) throw new NotAvailableError('The response has no body')
+  const body = await readDeclared(error.response.body, size)
+  if (body[0] !== COSE_ENCRYPT0_TAG_BYTE) throw new NotAShareError()
+  return {
+    size,
+    openRange: async (offset, length) => streamOf(body.subarray(offset, offset + length)),
+  }
+}
+
+/**
+ * The largest whole body kept in memory: half the in-memory save cap (256 MiB on desktop, 128 MiB on mobile). The body
+ * stays for as long as the share is open, next to whatever a save needs, so it gets half of the measured budget.
+ */
+export function wholeBodyCap(): number {
+  return saveFallbackCap() / 2
+}
+
+// Fills one buffer of the declared size as chunks arrive, so the body costs its size once, not twice. A body that
+// stops short, or runs past its declared size, is reported as an incomplete download.
+async function readDeclared(stream: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
+  const out = new Uint8Array(size)
+  const reader = stream.getReader()
+  let at = 0
+  for (;;) {
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch (cause) {
+      throw new NotAvailableError('The download was interrupted', { cause })
+    }
+    if (chunk.done) break
+    if (chunk.value.length > size - at) {
+      await reader.cancel().catch(() => undefined)
+      throw new NotAvailableError('The download was longer than declared')
+    }
+    out.set(chunk.value, at)
+    at += chunk.value.length
+  }
+  if (at !== size) throw new NotAvailableError('The download was incomplete')
+  return out
 }
 
 const UNSATISFIED_RANGE = /^bytes \*\/(\d+)$/

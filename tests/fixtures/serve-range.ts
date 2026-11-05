@@ -2,8 +2,9 @@
 // `mode` can be changed between requests; `requests` records what was asked for.
 // 'strict' answers 416 when the requested end is past the last byte, as the gateway's service worker does, instead of
 // clamping. 'installer' answers like inbrowser.link's server without its service worker: 200 with an HTML page;
-// `installerPages` counts them and `installerCancels` how many bodies were cancelled.
-export type StubMode = 'range' | 'full' | 'truncated' | 'strict' | 'installer' | number
+// `installerPages` counts them and `installerCancels` how many bodies were cancelled. 'full' answers 200 with the whole
+// file and its Content-Length; 'chunked' the same without Content-Length, as a chunked response arrives.
+export type StubMode = 'range' | 'full' | 'chunked' | 'truncated' | 'strict' | 'installer' | number
 
 export interface RangeRequest {
   url: string
@@ -55,6 +56,7 @@ export function serveRange(bytes: Uint8Array, mode: StubMode = 'range'): RangeSt
       if (stub.mode === 'full') {
         return new Response(bytes as BodyInit, { status: 200, headers: { 'content-length': String(bytes.length) } })
       }
+      if (stub.mode === 'chunked') return new Response(bytes as BodyInit, { status: 200 })
       const slice = bytes.subarray(offset, end + 1)
       const body = stub.mode === 'truncated' ? slice.subarray(0, slice.length >> 1) : slice
       return new Response(body as BodyInit, {
