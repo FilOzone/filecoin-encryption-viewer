@@ -477,6 +477,8 @@ describe('when a web page comes back instead of the share (200 text/html)', () =
 })
 
 describe('when the server does not serve ranges', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it('opens a share served whole with a 200, reading everything from that one response', async () => {
     const share = await makeShare(bigFolder)
     const { archive, stub } = await open(share, 'full')
@@ -533,7 +535,6 @@ describe('when the server does not serve ranges', () => {
     expect(wholeBodyCap()).toBe(256 * 1024 * 1024)
     vi.stubGlobal('navigator', { userAgentData: { mobile: true } })
     expect(wholeBodyCap()).toBe(128 * 1024 * 1024)
-    vi.unstubAllGlobals()
   })
 
   it('reports a whole 200 body shorter than its Content-Length as not available', async () => {
