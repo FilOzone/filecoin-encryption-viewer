@@ -19,6 +19,7 @@ import {
 } from '../src/car-archive.js'
 import type { ProtectedArchive } from '../src/car-archive.js'
 import { GatewayInactiveError, UnexpectedPageError } from '../src/errors.js'
+import { wholeBodyCap } from '../src/range-source.js'
 import { encodeVarint } from '../src/unixfs-car-layout.js'
 import { expectSameBytes } from './fixtures/bytes.js'
 import {
@@ -52,6 +53,27 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> 
 
 const requested = (stub: { requests: { length: number }[] }, from = 0) =>
   stub.requests.slice(from).reduce((total, request) => total + request.length, 0)
+
+// The share as a stream in two chunks that records how many were pulled and whether the reader cancelled it
+function chunkedBody(share: Uint8Array) {
+  const chunks = [share.subarray(0, 1024), share.subarray(1024)]
+  let pulled = 0
+  let cancelled = false
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        const next = chunks[pulled++]
+        if (next) controller.enqueue(next)
+        else controller.close()
+      },
+      cancel() {
+        cancelled = true
+      },
+    },
+    { highWaterMark: 0 }
+  )
+  return { stream, pulled: () => pulled, cancelled: () => cancelled }
+}
 
 async function open(share: Uint8Array, mode: StubMode = 'range') {
   const stub = serveRange(share, mode)
@@ -455,10 +477,89 @@ describe('when a web page comes back instead of the share (200 text/html)', () =
 })
 
 describe('when the server does not serve ranges', () => {
-  it('turns a 200 on the head request into RangeUnsupportedError, with the body intact', async () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('opens a share served whole with a 200, reading everything from that one response', async () => {
+    const share = await makeShare(bigFolder)
+    const { archive, stub } = await open(share, 'full')
+    expect(archive.list().map((entry) => entry.path)).toEqual(['big/', 'big/data.bin'])
+    expectSameBytes(await readAll(await archive.open('big/data.bin')), big)
+    expect(stub.requests).toHaveLength(1)
+  })
+
+  it('reports a whole 200 body that does not start with 0xd0 as not a share', async () => {
     const share = await makeShare(folder)
-    const error = await open(share, 'full').catch((cause) => cause)
+    share[0] = 0x00
+    await expect(open(share, 'full')).rejects.toBeInstanceOf(NotAShareError)
+  })
+
+  it('refuses a body that does not start with 0xd0 on its first chunk, without reading the rest', async () => {
+    const share = await makeShare(folder)
+    share[0] = 0x00
+    const body = chunkedBody(share)
+    const headers = { 'content-length': String(share.length) }
+    const fetchFn = (async () => new Response(body.stream, { status: 200, headers })) as typeof fetch
+    await expect(openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn)).rejects.toBeInstanceOf(NotAShareError)
+    expect(body.pulled()).toBe(1)
+    expect(body.cancelled()).toBe(true)
+  })
+
+  it('opens a share whose 416 retry gets the whole file in a 200', async () => {
+    const share = await makeShare(folder)
+    const requests: string[] = []
+    const fetchFn = (async (_input: unknown, init?: RequestInit) => {
+      requests.push(new Headers(init?.headers).get('range') ?? '')
+      if (requests.length === 1) {
+        return new Response('', { status: 416, headers: { 'content-range': `bytes */${share.length}` } })
+      }
+      return new Response(share as BodyInit, { status: 200, headers: { 'content-length': String(share.length) } })
+    }) as typeof fetch
+    const archive = await openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn)
+    expect(await readAll(await archive.open('photos/a.jpg'))).toEqual(bytes('jpeg bytes'))
+    expect(requests).toEqual([`bytes=1-${320 * 1024 - 1}`, `bytes=1-${share.length - 1}`])
+  })
+
+  it('reports a whole 200 body longer than its Content-Length as not available, and stops reading it', async () => {
+    const share = await makeShare(folder)
+    const body = chunkedBody(share)
+    const headers = { 'content-length': String(share.length - 1) }
+    const fetchFn = (async () => new Response(body.stream, { status: 200, headers })) as typeof fetch
+    await expect(openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn)).rejects.toBeInstanceOf(
+      NotAvailableError
+    )
+    expect(body.cancelled()).toBe(true)
+  })
+
+  it('caps the whole body at half the in-memory save cap: 256 MiB on desktop, 128 MiB on mobile', () => {
+    vi.stubGlobal('navigator', { userAgentData: { mobile: false } })
+    expect(wholeBodyCap()).toBe(256 * 1024 * 1024)
+    vi.stubGlobal('navigator', { userAgentData: { mobile: true } })
+    expect(wholeBodyCap()).toBe(128 * 1024 * 1024)
+  })
+
+  it('reports a whole 200 body shorter than its Content-Length as not available', async () => {
+    const share = await makeShare(folder)
+    const headers = { 'content-length': String(share.length + 1) }
+    const fetchFn = (async () => new Response(share as BodyInit, { status: 200, headers })) as typeof fetch
+    await expect(openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn)).rejects.toBeInstanceOf(
+      NotAvailableError
+    )
+  })
+
+  it('turns a 200 without Content-Length on the head request into RangeUnsupportedError, with the body intact', async () => {
+    const share = await makeShare(folder)
+    const error = await open(share, 'chunked').catch((cause) => cause)
     expect(error).toBeInstanceOf(RangeUnsupportedError)
+    expectSameBytes(new Uint8Array(await error.response.arrayBuffer()), share)
+  })
+
+  it('leaves the body of a 200 over the in-memory cap unread', async () => {
+    const share = await makeShare(folder)
+    const headers = { 'content-length': String(wholeBodyCap() + 1) }
+    const fetchFn = (async () => new Response(share as BodyInit, { status: 200, headers })) as typeof fetch
+    const error = await openProtectedArchive(CID_STRING, PAYLOAD, accessKey(), fetchFn).catch((cause) => cause)
+    expect(error).toBeInstanceOf(RangeUnsupportedError)
+    expect(error.response.bodyUsed).toBe(false)
     expectSameBytes(new Uint8Array(await error.response.arrayBuffer()), share)
   })
 

@@ -145,7 +145,7 @@ The type is detected from a bounded sniff of the decrypted bytes, never from the
 | Firefox 111+, Safari 26+ | Decrypted into a temporary file in the browser's private storage (OPFS), with "Decrypting… N%" progress, then downloaded from disk. Memory stays low at any size |
 | Private windows, older browsers | Built in memory, capped at 512 MiB on desktop and 256 MiB on mobile. Above that: "too large to save in this browser, use `filecoin-pin decrypt`" |
 
-Temporary OPFS files are deleted at the next save, when the page starts, and when it's closed. If the server ignores Range and sends the whole file, the viewer offers that encrypted file as a download (`encrypted.fee`), to decrypt with `filecoin-pin decrypt`. A share is never HTML, so a `200` with an HTML body is discarded and never offered for download. If no service worker controls the tab, it's inbrowser.link's installer page and the viewer asks the user to open the link again; otherwise it says a web page came back instead of the share (a captive portal or a proxy, for example).
+Temporary OPFS files are deleted at the next save, when the page starts, and when it's closed. If the server ignores Range and answers the first request with the whole file, the viewer reads it into memory when its `Content-Length` is present and at most 256 MiB (128 MiB on mobile, half the in-memory save cap), and opens the share from it. A body that doesn't start with the envelope tag is refused on its first chunk as "not a share", and one whose length doesn't match its `Content-Length` is "not available" (try again): it has been read by then, so it can't be offered for download. With no usable `Content-Length`, over the cap, or when a later read gets the whole file, the viewer offers that encrypted file as a download (`encrypted.fee`), to decrypt with `filecoin-pin decrypt`. A share is never HTML, so a `200` with an HTML body is discarded and never offered for download. If no service worker controls the tab, it's inbrowser.link's installer page and the viewer asks the user to open the link again; otherwise it says a web page came back instead of the share (a captive portal or a proxy, for example).
 
 ### Limits
 
@@ -157,6 +157,7 @@ A share must be exactly what `filecoin-pin add --encrypt` writes. The viewer rej
 | Name / path length | 1024 / 4096 bytes |
 | Metadata read before the tree shows | 16 MiB |
 | Layout work | 1,000,000 visits |
+| A whole-file `200` kept in memory | 256 MiB (128 MiB on mobile) |
 
 ## Development
 

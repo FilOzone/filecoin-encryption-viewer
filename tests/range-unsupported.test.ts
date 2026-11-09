@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatBytes } from '../src/format.js'
+import { wholeBodyCap } from '../src/range-source.js'
 import { expectSameBytes } from './fixtures/bytes.js'
 import { stubOpfs } from './fixtures/fake-opfs.js'
 import { ACCESS_KEY_TEXT, LINK_DATA, makeShare } from './fixtures/make-share.js'
@@ -57,16 +58,17 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('range ignored by the server', () => {
-  it('shows the state on the head request, with the size and the command, and saves the body through the picker', async () => {
+  // Without Content-Length the viewer can't bound the body, so it doesn't keep it in memory
+  it('shows the state on the head request, with the command, and saves the body through the picker', async () => {
     const share = await makeShare(folder)
-    vi.stubGlobal('fetch', serveRange(share, 'full').fetch)
+    vi.stubGlobal('fetch', serveRange(share, 'chunked').fetch)
     const { picker, written } = stubPicker()
 
     await openPage()
     const button = await waitFor(saveButton)
 
     expect(app().querySelector('h1')?.textContent).toBe("This share can't be opened in the browser")
-    expect(button.textContent).toBe(`Download encrypted file (${formatBytes(share.length)})`)
+    expect(button.textContent).toBe('Download encrypted file')
     expect(app().querySelector('code')?.textContent).toBe(COMMAND)
     // no archive yet on the first request: nothing to go back to
     expect(app().querySelector('#back-btn')).toBeNull()
@@ -75,6 +77,20 @@ describe('range ignored by the server', () => {
     await waitFor(() => app().querySelector('#save-status')?.textContent === 'Saved.')
     expect(picker).toHaveBeenCalledWith({ suggestedName: 'encrypted.fee' })
     expectSameBytes(new Uint8Array(written), share)
+  })
+
+  it('shows the state with the size when Content-Length is over the in-memory cap, leaving the body unread', async () => {
+    const share = await makeShare(folder)
+    const declared = wholeBodyCap() + 1
+    const response = new Response(share as BodyInit, { status: 200, headers: { 'content-length': String(declared) } })
+    vi.stubGlobal('fetch', async () => response)
+
+    await openPage()
+    const button = await waitFor(saveButton)
+
+    expect(app().querySelector('h1')?.textContent).toBe("This share can't be opened in the browser")
+    expect(button.textContent).toBe(`Download encrypted file (${formatBytes(declared)})`)
+    expect(response.bodyUsed).toBe(false)
   })
 
   it('omits the size without a Content-Length, and saves the body byte-identical through the Blob fallback', async () => {
@@ -98,7 +114,7 @@ describe('range ignored by the server', () => {
 
   it('saves the encrypted file through OPFS when available, with progress', async () => {
     const share = await makeShare(folder)
-    vi.stubGlobal('fetch', serveRange(share, 'full').fetch)
+    vi.stubGlobal('fetch', serveRange(share, 'chunked').fetch)
     const { files } = stubOpfs()
     vi.stubGlobal('showSaveFilePicker', undefined)
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -184,6 +200,56 @@ describe('range ignored by the server', () => {
 
     await waitFor(saveButton)
     expect(app().querySelector('h1')?.textContent).toBe("This share can't be opened in the browser")
+  })
+})
+
+describe('a share served whole (200 with Content-Length)', () => {
+  it('opens, previews, saves and zips from the one response', async () => {
+    // Over the document preview cap, so opening it offers a save instead of a preview
+    const huge = {
+      path: 'docs/huge.bin',
+      content: new Uint8Array(9 * 1024 * 1024).map((_, index) => (index * 31) % 251),
+    }
+    const share = await makeShare([huge, folder[1]])
+    const stub = serveRange(share, 'full')
+    vi.stubGlobal('fetch', stub.fetch)
+    vi.stubGlobal('showSaveFilePicker', undefined)
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }))
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const fileButton = (name: string) =>
+      Array.from(app().querySelectorAll<HTMLButtonElement>('button.tree-file')).find((b) =>
+        b.textContent?.includes(name)
+      )
+
+    await openPage()
+    ;(await waitFor(() => fileButton('note.txt'))).click()
+    await waitFor(() => app().querySelector('pre')?.textContent === 'note')
+
+    app().querySelector<HTMLButtonElement>('#back-btn')?.click()
+    ;(await waitFor(() => fileButton('huge.bin'))).click()
+    const save = await waitFor(() => app().querySelector<HTMLButtonElement>('#save-entry'))
+    save.click()
+    await waitFor(() => app().querySelector('#save-status')?.textContent === 'Saved.')
+    expectSameBytes(new Uint8Array(await (createObjectURL.mock.calls.at(-1)?.[0] as Blob).arrayBuffer()), huge.content)
+
+    app().querySelector<HTMLButtonElement>('#back-btn')?.click()
+    const downloadAll = await waitFor(() => app().querySelector<HTMLButtonElement>('#download-all'))
+    downloadAll.click()
+    await waitFor(() => app().querySelector('#zip-status')?.textContent === 'Zip ready.')
+
+    expect(click).toHaveBeenCalledTimes(2)
+    expect(stub.requests).toHaveLength(1)
+  })
+
+  it('reports a body that does not start with 0xd0 as not a share', async () => {
+    const share = await makeShare(folder)
+    share[0] = 0x00
+    vi.stubGlobal('fetch', serveRange(share, 'full').fetch)
+
+    await openPage()
+    await waitFor(() => app().textContent?.includes("This link doesn't point to a filecoin-pin encrypted share."))
+    expect(saveButton()).toBeNull()
   })
 })
 

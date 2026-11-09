@@ -36,9 +36,15 @@ function devHarness(): Plugin {
         try {
           const body = await readFile(DEV_SHARE_FILE)
           res.setHeader('Content-Type', 'application/octet-stream')
-          // ?ignore-range answers 200 with the whole file, like a server that ignores Range
-          const ignoreRange = new URL(req.url ?? '/', 'http://localhost').searchParams.has('ignore-range')
-          const range = ignoreRange ? undefined : req.headers.range
+          // ?ignore-range answers 200 with the whole file, like a server that ignores Range;
+          // ?ignore-range=chunked also leaves out Content-Length, so the viewer can't keep the body in memory
+          const ignoreRange = new URL(req.url ?? '/', 'http://localhost').searchParams.get('ignore-range')
+          const range = ignoreRange === null ? req.headers.range : undefined
+          if (ignoreRange === 'chunked') {
+            res.write(body)
+            res.end()
+            return
+          }
           if (range === undefined) {
             res.setHeader('Content-Length', body.length)
             res.end(body)

@@ -163,9 +163,11 @@ const elapsed = (since: number) => `${Math.round(performance.now() - since)} ms`
 const devLog = (message: string) => console.log(`[foc-viewer dev] ${message}`)
 
 // Serves the range requests from the dev harness and logs each one (offset, length, time until headers).
-// ?ignore-range makes the harness answer 200 with the whole file, to see the "can't be opened" state.
+// ?ignore-range makes the harness answer 200 with the whole file (opened from memory), and ?ignore-range=chunked the
+// same without Content-Length, to see the "can't be opened" state. The value is passed on as given.
 function devFetch(): typeof fetch {
-  const url = `/__dev-share${new URLSearchParams(window.location.search).has('ignore-range') ? '?ignore-range' : ''}`
+  const ignoreRange = new URLSearchParams(window.location.search).get('ignore-range')
+  const url = `/__dev-share${ignoreRange === null ? '' : `?${new URLSearchParams({ 'ignore-range': ignoreRange })}`}`
   return async (_input, init) => {
     const startedAt = performance.now()
     const response = await fetch(url, init)

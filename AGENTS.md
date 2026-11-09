@@ -16,7 +16,7 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 
 - `src/`: one module per concern:
   1. `fragment.ts` parses `#v1/<cid>&d=…[&k=…]` fragments and the `fak1_` Access key text.
-  2. `range-source.ts` reads the share with Range requests (`no-store`, `206` only, never byte 0).
+  2. `range-source.ts` reads the share with Range requests (`no-store`, `206` only, never byte 0), or from memory when the head read gets the whole envelope in a `200`.
   3. `unixfs-car-layout.ts` computes the tree and every block's offset from the metadata-first CAR, within the limits in README.md "Limits".
   4. `car-archive.ts` opens the link's payload with keysmith, derives the piece key, decrypts the metadata, builds the entry list, and streams a file's ranges in batches.
   5. `errors.ts` holds the error classes the UI maps to messages.
@@ -40,7 +40,8 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 | Wrong Access key | Enter any other `fak1_` key, or change a character of the printed one |
 | Prompt-side checks | Paste a Share link, a `fgr1_` Grant, or a key without its prefix |
 | Not available | Delete `dev/share.fee`, then submit |
-| Can't be opened in the browser | Add `?ignore-range` before the `#` (`http://localhost:5173/?ignore-range#v1/<cid>&d=…`); the dev server then answers `200` with the whole file |
+| Share served whole | Add `?ignore-range` before the `#` (`http://localhost:5173/?ignore-range#v1/<cid>&d=…`); the dev server then answers `200` with the whole file and its `Content-Length`, and a share up to 256 MiB opens from that one response |
+| Can't be opened in the browser | Add `?ignore-range=chunked` instead; the `200` then has no `Content-Length` (as over the in-memory cap), so the viewer offers the body as `encrypted.fee` |
 | Incomplete link | Use any other fragment, for example `#nope` |
 
 The real path (the inbrowser.link service worker intercepting `https://<cid>.ipfs.inbrowser.link/` and fetching from storage providers; the host is never reached directly) can only be tested on the published Viewer.
@@ -55,7 +56,7 @@ The real path (the inbrowser.link service worker intercepting `https://<cid>.ipf
   - HTML only in the sandboxed iframe;
   - SVG and XML as text.
 - **Range invariants:**
-  - every request uses `cache: 'no-store'` and must get a `206`;
+  - every request uses `cache: 'no-store'` and must get a `206`. The one exception is the head read: a `200` carrying the whole envelope, under the in-memory cap (`wholeBodyCap()`), is kept and read from memory;
   - **never request byte 0**: the gateway's service worker answers a range starting at byte 0 by downloading the whole file in the background (js-ipfs-unixfs#501). The first request is `bytes=1-327679`, and byte 0 is supplied as `0xd0`, the COSE_Encrypt0 tag every envelope starts with (see `range-source.ts`);
   - cancel the body of any response you throw away.
 - **OPFS:**
