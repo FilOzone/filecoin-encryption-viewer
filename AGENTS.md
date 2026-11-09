@@ -16,7 +16,7 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 
 - `src/`: one module per concern:
   1. `fragment.ts` parses `#v1/<cid>&d=…[&k=…]` fragments and the `fak1_` Access key text.
-  2. `range-source.ts` reads the share with Range requests (`no-store`, `206` only, never byte 0).
+  2. `range-source.ts` reads the share with Range requests (`no-store`, `206` only, never byte 0), or from memory when the head read gets the whole envelope in a `200`.
   3. `unixfs-car-layout.ts` computes the tree and every block's offset from the metadata-first CAR, within the limits in README.md "Limits".
   4. `car-archive.ts` opens the link's payload with keysmith, derives the piece key, decrypts the metadata, builds the entry list, and streams a file's ranges in batches.
   5. `errors.ts` holds the error classes the UI maps to messages.
@@ -56,7 +56,7 @@ The real path (the inbrowser.link service worker intercepting `https://<cid>.ipf
   - HTML only in the sandboxed iframe;
   - SVG and XML as text.
 - **Range invariants:**
-  - every request uses `cache: 'no-store'` and must get a `206`;
+  - every request uses `cache: 'no-store'` and must get a `206`. The one exception is the head read: a `200` carrying the whole envelope, under the in-memory cap (`wholeBodyCap()`), is kept and read from memory;
   - **never request byte 0**: the gateway's service worker answers a range starting at byte 0 by downloading the whole file in the background (js-ipfs-unixfs#501). The first request is `bytes=1-327679`, and byte 0 is supplied as `0xd0`, the COSE_Encrypt0 tag every envelope starts with (see `range-source.ts`);
   - cancel the body of any response you throw away.
 - **OPFS:**

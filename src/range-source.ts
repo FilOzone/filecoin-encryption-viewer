@@ -68,7 +68,6 @@ async function wholeBodySource(error: RangeUnsupportedError): Promise<RandomAcce
   if (!/^\d+$/.test(declared ?? '') || size > wholeBodyCap()) throw error
   if (!error.response.body) throw new NotAvailableError('The response has no body')
   const body = await readDeclared(error.response.body, size)
-  if (body[0] !== COSE_ENCRYPT0_TAG_BYTE) throw new NotAShareError()
   return {
     size,
     openRange: async (offset, length) => streamOf(body.subarray(offset, offset + length)),
@@ -84,7 +83,8 @@ export function wholeBodyCap(): number {
 }
 
 // Fills one buffer of the declared size as chunks arrive, so the body costs its size once, not twice. A body that
-// stops short, or runs past its declared size, is reported as an incomplete download.
+// doesn't start with 0xd0 isn't an envelope: it's refused on its first chunk, before the rest is downloaded. A body
+// that stops short, or runs past its declared size, is reported as an incomplete download.
 async function readDeclared(stream: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
   const out = new Uint8Array(size)
   const reader = stream.getReader()
@@ -97,6 +97,10 @@ async function readDeclared(stream: ReadableStream<Uint8Array>, size: number): P
       throw new NotAvailableError('The download was interrupted', { cause })
     }
     if (chunk.done) break
+    if (at === 0 && chunk.value.length > 0 && chunk.value[0] !== COSE_ENCRYPT0_TAG_BYTE) {
+      await reader.cancel().catch(() => undefined)
+      throw new NotAShareError()
+    }
     if (chunk.value.length > size - at) {
       await reader.cancel().catch(() => undefined)
       throw new NotAvailableError('The download was longer than declared')
