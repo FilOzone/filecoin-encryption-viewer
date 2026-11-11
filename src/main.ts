@@ -234,6 +234,8 @@ async function unlock(cid: string, payload: Uint8Array, accessKey: Uint8Array): 
 }
 
 const KEY_FAILED_MESSAGE = "The key in this link didn't work. Enter the Access key you received instead."
+const KEY_REMOVED_MESSAGE =
+  "For safety, this link's key was removed from the address. Open the original link again, or enter the Access key."
 
 // The key from a link, kept only so "Try again" can reuse it: the address bar no longer has it. Zeroed once done.
 let linkKey: Uint8Array | undefined
@@ -307,12 +309,18 @@ function openShare(): void {
 
   const { cid, payload, key } = fragment
   if (key) {
-    // Before any request: a reload or a copy of the address no longer carries the key.
-    history.replaceState(null, '', address)
+    // Before any request: a reload or a copy of the address no longer carries the key. The entry only records that it
+    // had one, so a reload can say why the prompt is back.
+    history.replaceState({ keyRemoved: true }, '', address)
     void unlockWithKey(cid, payload, key)
     return
   }
-  showAccessKeyPrompt(container, (accessKey) => unlockArchive(cid, payload, accessKey))
+  const keyRemoved = (history.state as { keyRemoved?: unknown } | null)?.keyRemoved === true
+  showAccessKeyPrompt(
+    container,
+    (accessKey) => unlockArchive(cid, payload, accessKey),
+    keyRemoved ? KEY_REMOVED_MESSAGE : undefined
+  )
 }
 
 window.addEventListener('hashchange', openShare)

@@ -176,12 +176,15 @@ it("reopens A on Back, at its prompt since A's address no longer has its key", a
   await waitFor(() => app().querySelector('button.tree-file'))
   navigate(LINK_B)
   await waitFor(() => app().querySelector('#access-key'))
+  // Only A's history entry records that its key was removed
+  expect((app().querySelector('#error') as HTMLElement).hidden).toBe(true)
   submitKey()
   await waitFor(() => shown('beta text'))
 
   history.back()
   await waitFor(() => window.location.hash === LINK_A && app().querySelector('#access-key'))
   expect(app().textContent).not.toContain('beta text')
+  expect(app().querySelector('#error')?.textContent).toContain("this link's key was removed")
   submitKey()
   await waitFor(() => app().querySelector('button.tree-file'))
 })

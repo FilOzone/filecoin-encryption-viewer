@@ -66,7 +66,7 @@ describe('a link that carries its Access key', () => {
     await waitFor(() => app().querySelector('button.tree-file'))
 
     expect(app().querySelector('#access-key')).toBeNull()
-    expect(replaceState).toHaveBeenCalledWith(null, '', link)
+    expect(replaceState).toHaveBeenCalledWith({ keyRemoved: true }, '', link)
     expect(window.location.hash).toBe(link)
     expect(fetchFn).toHaveBeenCalled()
     expect(hashes.every((hash) => hash === link)).toBe(true)
@@ -164,6 +164,27 @@ describe('a link without its Access key', () => {
     await waitFor(() => app().querySelector('#access-key'))
     expect((app().querySelector('#error') as HTMLElement).hidden).toBe(true)
     expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('says why the prompt is back after a reload of a link whose key was removed, and stores no key', async () => {
+    const { fetchFn } = await stubFetch()
+    const link = `#v1/${CID}&d=${LINK_DATA}`
+    await openPage(`${link}&k=${ACCESS_KEY_TEXT}`)
+    await waitFor(() => app().querySelector('button.tree-file'))
+    expect(history.state).toEqual({ keyRemoved: true })
+    fetchFn.mockClear()
+
+    unloadPage()
+    await openPage(window.location.hash, history.state)
+    await waitFor(() => app().querySelector('#access-key'))
+    expect(window.location.hash).toBe(link)
+    expect(errorText()).toBe(
+      "For safety, this link's key was removed from the address. Open the original link again, or enter the Access key."
+    )
+    expect(fetchFn).not.toHaveBeenCalled()
+
+    submitKey(ACCESS_KEY_TEXT)
+    await waitFor(() => app().querySelector('button.tree-file'))
   })
 
   it('refuses a wrong key without fetching, then opens with the right one', async () => {
