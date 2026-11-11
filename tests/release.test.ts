@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   DNSLINK_NAME,
   checkCid,
+  currentDnslink,
   readmeCid,
   setDnslink,
   upsertReadmeRow,
@@ -35,6 +36,36 @@ describe('viewerCid', () => {
     expect(await viewerCid(new TextEncoder().encode('hello world'))).toBe(
       'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e'
     )
+  })
+
+  it('takes exactly 1 MiB and refuses one byte more, which filecoin-pin would split into a multi-block file', async () => {
+    await expect(viewerCid(new Uint8Array(1_048_576))).resolves.toMatch(/^bafkrei/)
+    await expect(viewerCid(new Uint8Array(1_048_577))).rejects.toThrow('over 1 MiB')
+  })
+})
+
+describe('currentDnslink', () => {
+  const doh = (...data: string[]) => json({ Answer: data.map((value) => ({ data: value })) })
+
+  it('returns the CID the DNSLink serves, or nothing when it names none', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => doh(`"dnslink=/ipfs/${OLD}"`))
+    )
+    expect(await currentDnslink(poll)).toBe(OLD)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => json({}))
+    )
+    expect(await currentDnslink(poll)).toBe('')
+  })
+
+  it('refuses two DNSLink records, which would make the viewer ambiguous', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => doh(`"dnslink=/ipfs/${OLD}"`, `"dnslink=/ipfs/${NEW}"`))
+    )
+    await expect(currentDnslink(poll)).rejects.toThrow('2 DNSLink records')
   })
 })
 

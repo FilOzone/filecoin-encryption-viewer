@@ -12,12 +12,20 @@ export const VIEWER_URL = 'https://viewer.filecoin.cloud/'
 const IPNS_URL = 'https://viewer-filecoin-cloud.ipns.inbrowser.link/'
 const README_HEADER = '| Release | Viewer CID | Network |'
 const REQUEST_TIMEOUT_MS = 15_000
+// filecoin-pin packs with the unixfs-v1-2025 profile: 1 MiB chunks, and a file that fits in one becomes one raw block
+const MAX_RAW_BLOCK_BYTES = 1_048_576
 
 export type Poll = { attempts: number; intervalMs: number }
 export type Cloudflare = { token: string; zoneId: string; recordId: string }
 
-/** CIDv1 of a single file under 1 MiB, which filecoin-pin packs as one raw block. */
+/**
+ * CIDv1 of a single file of at most 1 MiB, which filecoin-pin packs as one raw block. A bigger file becomes a multi-block
+ * UnixFS file with another CID, so it fails here instead of producing a CID that the upload won't match.
+ */
 export async function viewerCid(bytes: Uint8Array): Promise<string> {
+  if (bytes.length > MAX_RAW_BLOCK_BYTES) {
+    throw new Error(`viewer is ${bytes.length} bytes, over 1 MiB: a raw-block CID would be wrong; use the packed CAR's`)
+  }
   return CID.create(1, raw.code, await sha256.digest(bytes)).toString()
 }
 
@@ -135,14 +143,24 @@ export async function setDnslink(cf: Cloudflare, cid: string, poll: Poll): Promi
   return previous
 }
 
+async function dnslinkAnswers(): Promise<string[]> {
+  const url = `https://cloudflare-dns.com/dns-query?name=${DNSLINK_NAME}&type=TXT`
+  const body = (await getJson(url, { headers: { accept: 'application/dns-json' } })) as { Answer?: { data?: string }[] }
+  return (body.Answer ?? []).map((answer) => answer.data ?? '')
+}
+
+/** The CID the DNSLink serves now, over DNS-over-HTTPS (no token), or '' when it names none. */
+export async function currentDnslink(poll: Poll): Promise<string> {
+  const answers = await retry(`DNS-over-HTTPS ${DNSLINK_NAME}`, poll, dnslinkAnswers)
+  const cids = answers.flatMap((data) => data.match(/dnslink=\/ipfs\/([a-z0-9]+)/)?.[1] ?? [])
+  if (cids.length > 1) throw new Error(`${DNSLINK_NAME} has ${cids.length} DNSLink records: ${cids.join(', ')}`)
+  return cids[0] ?? ''
+}
+
 /** Checks over DNS-over-HTTPS that the record serves `cid`. Resolvers may cache the old answer for the 300 s TTL. */
 export async function verifyDnslink(cid: string, poll: Poll): Promise<void> {
-  const url = `https://cloudflare-dns.com/dns-query?name=${DNSLINK_NAME}&type=TXT`
   await retry(`DNS-over-HTTPS ${DNSLINK_NAME}`, poll, async () => {
-    const body = (await getJson(url, { headers: { accept: 'application/dns-json' } })) as {
-      Answer?: { data?: string }[]
-    }
-    const answers = (body.Answer ?? []).map((answer) => answer.data ?? '')
+    const answers = await dnslinkAnswers()
     if (!answers.some((data) => data.includes(`dnslink=/ipfs/${cid}`))) throw new Error(`answer is ${answers}`)
   })
   console.error(`${DNSLINK_NAME} serves ${cid}`)
@@ -201,6 +219,8 @@ const commands: Record<string, (args: string[]) => Promise<string | undefined>> 
     await waitIndexed(cid ?? '', { attempts: Math.max(1, Number(minutes) * 2), intervalMs: 30_000 })
     return undefined
   },
+  /** dnslink-current: prints the CID the DNSLink serves now (DNS-over-HTTPS, no token), or nothing if none. */
+  'dnslink-current': async () => currentDnslink(fewTries),
   /** dnslink-set <cid>: points the DNSLink at the CID, verifies it, and prints the previous CID. */
   'dnslink-set': async ([cid]) => {
     const previous = await setDnslink(cloudflareFromEnv(), cid ?? '', fewTries)
