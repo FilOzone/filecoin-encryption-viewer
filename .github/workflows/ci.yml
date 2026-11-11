@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # The upload action's dry run comments the viewer CID on the PR and adds a check run.
+      pull-requests: write
+      checks: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Node 24 and pnpm 10.7.0 (packageManager): another toolchain can change the viewer CID.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm exec biome check .
+
+      - name: Viewer CID
+        run: |
+          cid="$(node scripts/release.ts cid)"
+          echo "Viewer CID: \`$cid\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # No wallet: packs dist/index.html and comments the CID it would publish. The action refuses fork PRs, whose
+      # read-only token couldn't comment anyway, so they only get the checks above.
+      - name: Dry-run upload
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: filecoin-project/filecoin-pin/upload-action@73aef90c36ab7f3d3907b15315dbc3e4fd1b41e6 # v2.3.0
+        with:
+          path: dist/index.html
+          network: mainnet
+          dryRun: "true"

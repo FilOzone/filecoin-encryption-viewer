@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "changelog-path": "CHANGELOG.md",
+      "include-v-in-tag": true,
+      "include-component-in-tag": false,
+      "pull-request-header": "Viewer release",
+      "bootstrap-sha": "93baa8e706bda58f84e5b6b1b9c2972fa8483655",
+      "pull-request-footer": "\n\n## What merging does\n\n1. release-please tags this version and creates its GitHub release.\n2. The **Release** workflow waits for a maintainer to approve the `release` environment, then rebuilds the tag and fails if its viewer CID differs from the README row for this tag.\n3. It uploads `dist/index.html` to Filecoin **mainnet**, waits until cid.contact indexes it, and points the DNSLink record `_dnslink.viewer.filecoin.cloud` at it, so https://viewer.filecoin.cloud/ serves the new build. The release notes record the new and the previous CID; the **Rollback** workflow switches back.\n\nfilecoin-pin's `DEFAULT_VIEWER_URL` stays `https://viewer.filecoin.cloud/` and needs no change.\n\nThe README commit on this PR is pushed by CI with `GITHUB_TOKEN`, so it doesn't re-run the PR checks.",
+      "changelog-sections": [
+        {
+          "type": "feat",
+          "section": "Features",
+          "hidden": false
+        },
+        {
+          "type": "fix",
+          "section": "Bug Fixes",
+          "hidden": false
+        },
+        {
+          "type": "chore",
+          "section": "Chores",
+          "hidden": false
+        },
+        {
+          "type": "docs",
+          "section": "Documentation",
+          "hidden": false
+        }
+      ]
+    }
+  }
+}

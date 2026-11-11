@@ -1,0 +1,184 @@
+name: Release
+
+# Everything release-please creates with GITHUB_TOKEN (the release PR, its pushes, the tag and the release) triggers
+# no other workflow, so publishing is chained here on `release_created` instead of on a tag or release event.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      pr_branch: ${{ steps.pr.outputs.branch }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # `pr` is set only when this run created or updated the release PR.
+      - name: Release PR branch
+        id: pr
+        if: steps.release.outputs.pr
+        env:
+          PR: ${{ steps.release.outputs.pr }}
+        run: echo "branch=$(jq -r .headBranchName <<< "$PR")" >> "$GITHUB_OUTPUT"
+
+  # Records the release PR's viewer CID in the README, keyed by its upcoming tag. release-please rewrites its branch on
+  # every push to main, dropping this commit, so it runs again each time. This push doesn't re-run the PR checks.
+  release-pr-readme:
+    needs: release-please
+    if: needs.release-please.outputs.pr_branch != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: release-pr-readme
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.pr_branch }}
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Commit the README row
+        env:
+          BRANCH: ${{ needs.release-please.outputs.pr_branch }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          cid="$(node scripts/release.ts cid)"
+          node scripts/release.ts readme-set "$tag" "$cid"
+          if git diff --quiet README.md; then
+            echo "README already records the viewer CID for $tag"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "docs: record the viewer CID for $tag" README.md
+          git push origin "HEAD:$BRANCH"
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: release
+    # Shared with the Rollback workflow, so two runs never race the DNSLink update.
+    concurrency:
+      group: dnslink
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      cid: ${{ steps.cid.outputs.cid }}
+      previous: ${{ steps.dnslink.outputs.previous }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Check the CID against the README
+        id: cid
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          cid="$(node scripts/release.ts cid)"
+          recorded="$(node scripts/release.ts readme-get "$TAG")"
+          if [ "$cid" != "$recorded" ]; then
+            echo "::error::$TAG builds $cid, but README.md records $recorded"
+            exit 1
+          fi
+          echo "cid=$cid" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to mainnet
+        id: upload
+        uses: filecoin-project/filecoin-pin/upload-action@73aef90c36ab7f3d3907b15315dbc3e4fd1b41e6 # v2.3.0
+        with:
+          path: dist/index.html
+          walletPrivateKey: ${{ secrets.FILECOIN_WALLET_KEY }}
+          network: mainnet
+          # Hardcoded spending limits (placeholders, maintainer to confirm).
+          minRunwayDays: "30"
+          maxBalance: "5.00"
+
+      - name: Check the uploaded CID
+        env:
+          CID: ${{ steps.cid.outputs.cid }}
+          UPLOADED: ${{ steps.upload.outputs.ipfsRootCid }}
+          STATUS: ${{ steps.upload.outputs.uploadStatus }}
+        run: |
+          if [ "$STATUS" != uploaded ] || [ "$UPLOADED" != "$CID" ]; then
+            echo "::error::upload returned $UPLOADED ($STATUS), expected $CID (uploaded)"
+            exit 1
+          fi
+
+      - name: Wait for cid.contact
+        env:
+          CID: ${{ steps.cid.outputs.cid }}
+        run: node scripts/release.ts wait-indexed "$CID" 45
+
+      - name: Point the DNSLink at the release
+        id: dnslink
+        env:
+          CID: ${{ steps.cid.outputs.cid }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          DNSLINK_RECORD_ID: ${{ vars.DNSLINK_RECORD_ID }}
+        run: |
+          previous="$(node scripts/release.ts dnslink-set "$CID")"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+
+  # Separate from publish so the wallet-handling job never holds a token that can write to the repo.
+  release-notes:
+    needs: [release-please, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Add the CIDs to the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          CID: ${{ needs.publish.outputs.cid }}
+          PREVIOUS: ${{ needs.publish.outputs.previous }}
+        run: |
+          {
+            gh release view "$TAG" --json body --jq .body
+            printf '\n## Viewer\n\n'
+            printf -- '- Viewer CID: `%s`\n' "$CID"
+            printf -- '- Previous viewer CID: `%s`\n' "${PREVIOUS:-none}"
+            printf -- '- Stable URL: https://viewer.filecoin.cloud/ (DNSLink `_dnslink.viewer.filecoin.cloud`)\n'
+          } > notes.md
+          gh release edit "$TAG" --notes-file notes.md
