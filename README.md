@@ -184,7 +184,7 @@ pnpm dev
 
 ## Verifiable build
 
-Recipients trust this page with their Access key, so anyone should be able to check that a Viewer CID was built from this source. The build is reproducible: lockfile, pinned Node and pnpm, and no timestamps in the output.
+Recipients trust this page with their Access key, so anyone should be able to check that a Viewer CID was built from this source. The build is reproducible: lockfile, Node 24, pnpm 10.7.0, and no timestamps in the output. CI checks each release's CID against the table below, so a toolchain that changes the build fails the release.
 
 ```sh
 git checkout <tag>
@@ -195,8 +195,9 @@ filecoin-pin add dist/index.html --dry-run   # prints the root CID without uploa
 
 The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-filecoin-cloud.ipns.inbrowser.link/`, which serves the build named by the [DNSLink](https://dnslink.dev) record `_dnslink.viewer.filecoin.cloud`. Releases are made by CI:
 
-1. Each push to `main` updates a release PR (version bump and changelog), and CI commits that build's CID to the table below, keyed by the upcoming tag.
-2. Merging the release PR tags the release. After a maintainer approves, CI rebuilds the tag, fails if its CID differs from the table, uploads it to mainnet, waits until [cid.contact](https://cid.contact) indexes it, then points the DNSLink record at it. A release whose viewer is already deployed skips all of that. The release notes record the new and the previous CID.
+1. Each push to `main` updates a release PR (version bump and changelog), and CI commits that build's CID to the table below, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs no CI checks on them; their commits were checked on `main`.
+2. Merging the release PR tags the release, and CI builds the released commit, failing if its CID differs from the table. A release deploys only when it changes the viewer, that is, when its CID differs from the previous row; a rollback stays until then.
+3. To deploy, a maintainer approves, and CI uploads that build to mainnet, waits until [cid.contact](https://cid.contact) indexes it, then points the DNSLink record at it. The release notes record the new and the previous CID.
 
 | Release | Viewer CID | Network |
 |---|---|---|
