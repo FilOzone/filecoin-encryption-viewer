@@ -187,15 +187,22 @@ pnpm dev
 Recipients trust this page with their Access key, so anyone should be able to check that a Viewer CID was built from this source. The build is reproducible: lockfile, pinned Node and pnpm, and no timestamps in the output.
 
 ```sh
-git checkout <commit>
+git checkout <tag>
 pnpm install --frozen-lockfile
 pnpm build
 filecoin-pin add dist/index.html --dry-run   # prints the root CID without uploading
 ```
 
-| Commit | Viewer CID | Network |
+The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-filecoin-cloud.ipns.inbrowser.link/`, which serves the build named by the [DNSLink](https://dnslink.dev) record `_dnslink.viewer.filecoin.cloud`. Releases are made by CI:
+
+1. Each push to `main` updates a release PR (version bump and changelog), and CI commits that build's CID to the table below, keyed by the upcoming tag.
+2. Merging the release PR tags the release. After a maintainer approves, CI rebuilds the tag, fails if its CID differs from the table, uploads it to mainnet, waits until [cid.contact](https://cid.contact) indexes it, then points the DNSLink record at it. The release notes record the new and the previous CID.
+
+| Release | Viewer CID | Network |
 |---|---|---|
 | `9b141cb` | `bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy` | mainnet |
+
+The `9b141cb` row predates releases, so it names a commit. To point the stable URL back at a recorded build, run the **Rollback** workflow with its CID.
 
 ## Credits
 

@@ -46,6 +46,15 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 
 The real path (the inbrowser.link service worker intercepting `https://<cid>.ipfs.inbrowser.link/` and fetching from storage providers; the host is never reached directly) can only be tested on the published Viewer.
 
+## Releases and CI
+
+- `.github/workflows/ci.yml` runs the four checks on every PR and push to `main`, then a dry-run upload (no wallet) that comments the PR's viewer CID. Fork PRs get the checks only.
+- `.github/workflows/release.yml` runs on push to `main`. release-please (`release-please-config.json`) opens or updates the release PR, and `release-pr-readme` commits that build's CID to README.md's "Verifiable build" table, keyed by the upcoming tag. Merging the release PR tags it; `publish` then rebuilds the tag, fails if the CID differs from the README, uploads `dist/index.html` to mainnet, waits for cid.contact, and points the DNSLink TXT record `_dnslink.viewer.filecoin.cloud` at the CID. `release-notes` adds the new and previous CID to the GitHub release.
+- `.github/workflows/rollback.yml` (manual, input `cid`) points the DNSLink at a CID that's in the README table and indexed.
+- `publish` and `rollback` run in the GitHub Environment `release`, which needs a reviewer's approval. It holds the secrets `FILECOIN_WALLET_KEY` and `CLOUDFLARE_API_TOKEN` (Zone → DNS → Edit, `filecoin.cloud` only) and the variables `CLOUDFLARE_ZONE_ID` and `DNSLINK_RECORD_ID`. No other job may use them.
+- The logic lives in `scripts/release.ts` (tested in `tests/release.test.ts`), not in the workflow YAML. Pin every action by commit SHA.
+- `https://viewer.filecoin.cloud/` redirects to `https://viewer-filecoin-cloud.ipns.inbrowser.link/`, which resolves the DNSLink. filecoin-pin's `DEFAULT_VIEWER_URL` is `https://viewer.filecoin.cloud/`, so releases never change it.
+
 ## Rules
 
 - **The build is one self-contained HTML file.** No external requests except Range requests to `https://*.ipfs.inbrowser.link`, which the service worker intercepts. Don't add dependencies lightly, and keep everything inline.
