@@ -4,6 +4,7 @@ import { encodeAccessKey, type parseFragment } from '../src/fragment.js'
 import { expectSameBytes } from './fixtures/bytes.js'
 import { ACCESS_KEY_TEXT, LINK_DATA, accessKey, delivery, makeShare, plainGrant } from './fixtures/make-share.js'
 import { serveRange } from './fixtures/serve-range.js'
+import { loadPage, unloadPage } from './fixtures/viewer-page.js'
 
 const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3udhvy6o2x4i5woy4vgr3vnz4'
 const files = [
@@ -37,12 +38,7 @@ async function stubFetch() {
   return { fetchFn, hashes }
 }
 
-async function openPage(hash: string): Promise<void> {
-  vi.resetModules()
-  document.body.innerHTML = '<div id="app"></div>'
-  window.location.hash = hash
-  await import('../src/main.js')
-}
+const openPage = loadPage
 
 function submitKey(text: string): void {
   ;(app().querySelector('#access-key') as HTMLInputElement).value = text
@@ -52,6 +48,7 @@ function submitKey(text: string): void {
 }
 
 afterEach(() => {
+  unloadPage()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -129,9 +126,11 @@ describe('a link that carries its Access key', () => {
     let parsed = null as ReturnType<typeof parseFragment>
     vi.doMock('../src/fragment.js', async (importOriginal) => {
       const original = await importOriginal<typeof import('../src/fragment.js')>()
+      // Only the parse with the key: happy-dom's hashchange for the viewer's own replaceState parses it again without
       const capture = (hash: string) => {
-        parsed = original.parseFragment(hash)
-        return parsed
+        const result = original.parseFragment(hash)
+        if (result?.key) parsed = result
+        return result
       }
       return { ...original, parseFragment: capture }
     })

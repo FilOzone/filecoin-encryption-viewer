@@ -28,7 +28,7 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
   11. `zip.ts` streams the "Download all" ZIP from the open archive (with [`client-zip`](https://github.com/Touffy/client-zip)).
   12. `card-label.ts` manages the label above the card and the card layout per screen.
   13. `ui.ts` owns the Access key prompt (with its local checks) and retry, the folder tree, and the save, too-large, not-available and can't-be-opened states.
-  14. `main.ts` connects the link, Access key, archive, entry and renderer paths.
+  14. `main.ts` connects the link, Access key, archive, entry and renderer paths, and reopens on every fragment change (`hashchange`), closing the previous share; a generation number stops its late work.
 - `tests/`: vitest in the `node` environment. The fixtures in `tests/fixtures/` build real metadata-first shares (`make-share.ts`), serve them with Range (`serve-range.ts`), and fake OPFS and Web Locks (`fake-opfs.ts`).
 
 ## Testing locally
