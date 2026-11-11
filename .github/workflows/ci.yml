@@ -22,17 +22,26 @@ jobs:
       pull-requests: write
       checks: write
       actions: read
+    # The repo is checked out into viewer/, so the workspace root has no package.json: the upload action sets up its own
+    # pnpm with pnpm/action-setup, which also reads the root package.json's packageManager and refuses two versions.
+    defaults:
+      run:
+        working-directory: viewer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: viewer
           persist-credentials: false
 
       # Node 24 and pnpm 10.7.0 (packageManager): another toolchain can change the viewer CID.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: viewer/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version-file: viewer/.nvmrc
           cache: pnpm
+          cache-dependency-path: viewer/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
@@ -51,6 +60,6 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: filecoin-project/filecoin-pin/upload-action@73aef90c36ab7f3d3907b15315dbc3e4fd1b41e6 # v2.3.0
         with:
-          path: dist/index.html
+          path: viewer/dist/index.html
           network: mainnet
           dryRun: "true"
