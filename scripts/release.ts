@@ -29,11 +29,13 @@ export async function viewerCid(bytes: Uint8Array): Promise<string> {
   return CID.create(1, raw.code, await sha256.digest(bytes)).toString()
 }
 
-/** Accepts only a base32 CIDv1 (`bafkrei…` for a raw block, `bafy…` for dag-pb); returns it unchanged. */
+/**
+ * Accepts only a canonical base32 CIDv1 (`bafkrei…` for a raw block, `bafy…` for dag-pb); returns it unchanged. The
+ * prefix fixes the version and codec, and CID.parse rejects a bad digest and non-zero padding bits.
+ */
 export function checkCid(input: string): string {
   if (!/^(bafkrei|bafy)[a-z2-7]+$/.test(input)) throw new Error(`not a base32 CIDv1 (bafkrei…/bafy…): "${input}"`)
-  const cid = CID.parse(input)
-  if (cid.version !== 1 || cid.toString() !== input) throw new Error(`not a canonical CIDv1: "${input}"`)
+  CID.parse(input)
   return input
 }
 
@@ -58,6 +60,17 @@ export function readmeRows(readme: string): [string, string][] {
 
 export function readmeCid(readme: string, tag: string): string | undefined {
   return readmeRows(readme).find(([key]) => key === tag)?.[1]
+}
+
+/**
+ * The CID of the row just before `tag`'s, which is the previous release's (or, for the first release, the last
+ * pre-release build's); '' when `tag` is the first row. A release deploys only when its CID differs from this one.
+ */
+export function readmePreviousCid(readme: string, tag: string): string {
+  const rows = readmeRows(readme)
+  const at = rows.findIndex(([key]) => key === tag)
+  if (at < 0) throw new Error(`README.md has no Verifiable build row for ${tag}`)
+  return at === 0 ? '' : rows[at - 1][1]
 }
 
 /** Sets the row for `tag`, replacing it in place or appending it to the table. Unchanged input when already set. */
@@ -128,6 +141,7 @@ async function cloudflare(cf: Cloudflare, init: RequestInit = {}): Promise<Cloud
 /**
  * Points the DNSLink record at `cid` and returns the CID it pointed at before (or '' if it held no DNSLink).
  * Refuses to touch a record that isn't the viewer's TXT record, so a wrong DNSLINK_RECORD_ID can't change another one.
+ * Skips the PATCH when the record already names `cid` (a re-run), reading Cloudflare rather than a caching resolver.
  */
 export async function setDnslink(cf: Cloudflare, cid: string, poll: Poll): Promise<string> {
   checkCid(cid)
@@ -136,6 +150,10 @@ export async function setDnslink(cf: Cloudflare, cid: string, poll: Poll): Promi
     throw new Error(`record ${cf.recordId} is ${current?.type} ${current?.name}, expected TXT ${DNSLINK_NAME}`)
   }
   const previous = current.content?.match(/dnslink=\/ipfs\/([a-z0-9]+)/)?.[1] ?? ''
+  if (previous === cid) {
+    console.error(`DNSLink record already names ${cid}; not changing it`)
+    return previous
+  }
   const content = `"dnslink=/ipfs/${cid}"`
   const body = JSON.stringify({ type: 'TXT', name: DNSLINK_NAME, content, ttl: 300 })
   await retry('update DNSLink record', poll, () => cloudflare(cf, { method: 'PATCH', body }))
@@ -143,25 +161,25 @@ export async function setDnslink(cf: Cloudflare, cid: string, poll: Poll): Promi
   return previous
 }
 
-async function dnslinkAnswers(): Promise<string[]> {
+/** The CIDs in the DNSLink's TXT answers over DNS-over-HTTPS; a failed lookup (SERVFAIL, NXDOMAIN…) throws. */
+async function dnslinkCids(): Promise<string[]> {
   const url = `https://cloudflare-dns.com/dns-query?name=${DNSLINK_NAME}&type=TXT`
-  const body = (await getJson(url, { headers: { accept: 'application/dns-json' } })) as { Answer?: { data?: string }[] }
-  return (body.Answer ?? []).map((answer) => answer.data ?? '')
+  const body = (await getJson(url, { headers: { accept: 'application/dns-json' } })) as {
+    Status?: number
+    Answer?: { data?: string }[]
+  }
+  if (body.Status !== 0) throw new Error(`DNS status ${body.Status}`)
+  return (body.Answer ?? []).flatMap((answer) => answer.data?.match(/dnslink=\/ipfs\/([a-z0-9]+)/)?.[1] ?? [])
 }
 
-/** The CID the DNSLink serves now, over DNS-over-HTTPS (no token), or '' when it names none. */
-export async function currentDnslink(poll: Poll): Promise<string> {
-  const answers = await retry(`DNS-over-HTTPS ${DNSLINK_NAME}`, poll, dnslinkAnswers)
-  const cids = answers.flatMap((data) => data.match(/dnslink=\/ipfs\/([a-z0-9]+)/)?.[1] ?? [])
-  if (cids.length > 1) throw new Error(`${DNSLINK_NAME} has ${cids.length} DNSLink records: ${cids.join(', ')}`)
-  return cids[0] ?? ''
-}
-
-/** Checks over DNS-over-HTTPS that the record serves `cid`. Resolvers may cache the old answer for the 300 s TTL. */
+/**
+ * Checks over DNS-over-HTTPS that the DNSLink names exactly `cid` and nothing else. Resolvers may cache the old answer
+ * for the 300 s TTL.
+ */
 export async function verifyDnslink(cid: string, poll: Poll): Promise<void> {
   await retry(`DNS-over-HTTPS ${DNSLINK_NAME}`, poll, async () => {
-    const answers = await dnslinkAnswers()
-    if (!answers.some((data) => data.includes(`dnslink=/ipfs/${cid}`))) throw new Error(`answer is ${answers}`)
+    const cids = await dnslinkCids()
+    if (cids.length !== 1 || cids[0] !== cid) throw new Error(`answer names ${cids.join(', ') || 'no CID'}`)
   })
   console.error(`${DNSLINK_NAME} serves ${cid}`)
 }
@@ -200,6 +218,8 @@ const commands: Record<string, (args: string[]) => Promise<string | undefined>> 
     if (!cid) throw new Error(`README.md has no Verifiable build row for ${tag}`)
     return cid
   },
+  /** readme-previous <tag>: prints the CID of the row before the tag's, or nothing for the first row. */
+  'readme-previous': async ([tag]) => readmePreviousCid(readFileSync(readmePath, 'utf8'), checkTag(tag ?? '')),
   /** readme-set <tag> <cid>: records the CID for a release tag in README.md. */
   'readme-set': async ([tag, cid]) => {
     const readme = readFileSync(readmePath, 'utf8')
@@ -219,14 +239,13 @@ const commands: Record<string, (args: string[]) => Promise<string | undefined>> 
     await waitIndexed(cid ?? '', { attempts: Math.max(1, Number(minutes) * 2), intervalMs: 30_000 })
     return undefined
   },
-  /** dnslink-current: prints the CID the DNSLink serves now (DNS-over-HTTPS, no token), or nothing if none. */
-  'dnslink-current': async () => currentDnslink(fewTries),
-  /** dnslink-set <cid>: points the DNSLink at the CID, verifies it, and prints the previous CID. */
-  'dnslink-set': async ([cid]) => {
-    const previous = await setDnslink(cloudflareFromEnv(), cid ?? '', fewTries)
-    await verifyDnslink(cid ?? '', { attempts: 20, intervalMs: 30_000 })
+  /** dnslink-set <cid>: points the DNSLink record at the CID and prints the CID it named before. */
+  'dnslink-set': async ([cid]) => setDnslink(cloudflareFromEnv(), cid ?? '', fewTries),
+  /** dnslink-verify <cid>: checks over DNS-over-HTTPS that the DNSLink names the CID, and the stable URL's redirect. */
+  'dnslink-verify': async ([cid]) => {
+    await verifyDnslink(checkCid(cid ?? ''), { attempts: 20, intervalMs: 30_000 })
     await verifyRedirect(fewTries)
-    return previous
+    return undefined
   },
 }
 

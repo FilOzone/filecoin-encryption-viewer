@@ -17,7 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
-    # Shared with the Release workflow's publish job, so two runs never race the DNSLink update.
+    # Shared with the Release workflow's publish job: one DNSLink change at a time. A newer queued run replaces an older
+    # queued one, which then never starts, so the viewer is left as it was, never half-switched.
     concurrency:
       group: dnslink
       cancel-in-progress: false
@@ -32,7 +33,8 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      # scripts/release.ts needs only multiformats; no lifecycle scripts next to the Cloudflare token.
+      - run: pnpm install --frozen-lockfile --prod --ignore-scripts
 
       - name: Check the CID is a recorded, indexed build
         env:
@@ -49,4 +51,9 @@ jobs:
           DNSLINK_RECORD_ID: ${{ vars.DNSLINK_RECORD_ID }}
         run: |
           previous="$(node scripts/release.ts dnslink-set "$CID")"
-          echo "Rolled the viewer back to \`$CID\` (was \`${previous:-none}\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pointed the viewer at \`$CID\` (was \`${previous:-none}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the DNSLink and the redirect
+        env:
+          CID: ${{ inputs.cid }}
+        run: node scripts/release.ts dnslink-verify "$CID"
