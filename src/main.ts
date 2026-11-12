@@ -36,6 +36,14 @@ const container = getContainer()
 let activeArchive: ProtectedArchive | undefined
 const folderState = new Map<string, boolean>()
 
+// Bumped each time a share is closed. Async work notes it when it starts, and once it no longer matches (another link
+// was opened), that work stops without touching the page.
+let generation = 0
+const isStale = (since: number) => since !== generation
+
+// Aborted when the share is closed: its requests stop, including the body of a 200 still offered as encrypted.fee
+let shareRequests = new AbortController()
+
 async function closeArchive(archive: ProtectedArchive): Promise<void> {
   if (activeArchive === archive) activeArchive = undefined
   await archive.close()
@@ -45,10 +53,13 @@ const fileName = (entry: ProtectedEntry) => entry.path.split('/').at(-1) ?? 'Dec
 
 async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry, closeAfterOpen = false): Promise<void> {
   if (entry.directory) return
+  const since = generation
   try {
     if (entry.size <= MAX_DOCUMENT_PREVIEW_BYTES) {
       const data = await readInlineEntry(await archive.open(entry.path), entry.size, MAX_DOCUMENT_PREVIEW_BYTES)
-      renderContent(container, data, await detectContentType(data), fileName(entry), entry.path)
+      const contentType = await detectContentType(data)
+      if (isStale(since)) return
+      renderContent(container, data, contentType, fileName(entry), entry.path)
       if (closeAfterOpen) await closeArchive(archive)
       return
     }
@@ -57,12 +68,14 @@ async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry, c
     if (entry.size <= MAX_BINARY_PREVIEW_BYTES) {
       if (isBinaryPreviewType(detectedType)) {
         const data = await readInlineEntry(await archive.open(entry.path), entry.size, MAX_BINARY_PREVIEW_BYTES)
+        if (isStale(since)) return
         renderContent(container, data, detectedType, fileName(entry), entry.path)
         if (closeAfterOpen) await closeArchive(archive)
         return
       }
     }
 
+    if (isStale(since)) return
     showSaveEntry(
       container,
       entry,
@@ -92,17 +105,23 @@ async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry, c
 
 // A 200 can also arrive while saving (a file or Download all): show the same screen instead of a save error
 async function orRangeIgnored(save: Promise<SaveResult>): Promise<SaveResult> {
+  const since = generation
   try {
     return await save
   } catch (error) {
     if (!(error instanceof RangeUnsupportedError)) throw error
-    showRangeIgnored(error.response)
+    showRangeIgnored(error.response, since)
     return 'cancelled'
   }
 }
 
 // The server answered a Range request with the whole encrypted file: offer the body already in flight as encrypted.fee.
-function showRangeIgnored(response: Response): void {
+// Unless the share opened at `since` was replaced meanwhile: then the body is discarded.
+function showRangeIgnored(response: Response, since: number): void {
+  if (isStale(since)) {
+    void response.body?.cancel().catch(() => undefined)
+    return
+  }
   const archive = activeArchive
   const length = Number(response.headers.get('content-length'))
   const size = length > 0 ? length : undefined
@@ -127,13 +146,15 @@ function showRangeIgnored(response: Response): void {
 // Folder shares keep the archive open: every file view gets a way back to the tree, with no new fetch.
 async function openEntry(archive: ProtectedArchive, entry: ProtectedEntry): Promise<void> {
   const startedAt = performance.now()
+  const since = generation
   try {
     await openAndRender(archive, entry)
   } catch (error) {
     if (!(error instanceof RangeUnsupportedError)) throw error
-    showRangeIgnored(error.response)
+    showRangeIgnored(error.response, since)
     return
   }
+  if (isStale(since)) return
   if (import.meta.env.DEV) devLog(`open ${entry.path} (${entry.size} bytes): ${elapsed(startedAt)}`)
   addBackButton(container, () => showTree(archive))
 }
@@ -179,22 +200,28 @@ function devFetch(): typeof fetch {
 }
 
 async function unlockArchive(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
+  const since = generation
   try {
     await unlock(cid, payload, accessKey)
   } catch (error) {
     if (!(error instanceof RangeUnsupportedError)) throw error
-    showRangeIgnored(error.response)
+    showRangeIgnored(error.response, since)
   }
 }
 
 async function unlock(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
   const startedAt = performance.now()
-  const archive = import.meta.env.DEV
-    ? await openProtectedArchive(cid, payload, accessKey, devFetch())
-    : await openProtectedArchive(cid, payload, accessKey)
+  const since = generation
+  const { signal } = shareRequests
+  const fetchFn = import.meta.env.DEV ? devFetch() : fetch
+  const archive = await openProtectedArchive(cid, payload, accessKey, (input, init) =>
+    fetchFn(input, { ...init, signal })
+  )
   if (import.meta.env.DEV)
     devLog(`archive ready (payload + head + metadata + decrypt + listing): ${elapsed(startedAt)}`)
-  await activeArchive?.close()
+  // Opened for a share that was replaced meanwhile: close it at once (zeroing its key), it never becomes active
+  if (isStale(since)) return archive.close()
+  void activeArchive?.close()
   activeArchive = archive
   const entries = archive.list()
   if (entries.length === 1 && !entries[0].directory) {
@@ -211,6 +238,8 @@ async function unlock(cid: string, payload: Uint8Array, accessKey: Uint8Array): 
 }
 
 const KEY_FAILED_MESSAGE = "The key in this link didn't work. Enter the Access key you received instead."
+const KEY_REMOVED_MESSAGE =
+  "For safety, this link's key was removed from the address. Open the original link again, or enter the Access key."
 
 // The key from a link, kept only so "Try again" can reuse it: the address bar no longer has it. Zeroed once done.
 let linkKey: Uint8Array | undefined
@@ -223,11 +252,14 @@ function forgetLinkKey(): void {
 // The link carries its Access key: open with a copy of it (openProtectedArchive zeroes what it gets). A wrong key falls
 // back to the prompt; a share that isn't available yet can be retried with the same key; anything else is final.
 async function unlockWithKey(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
+  const since = generation
   linkKey = accessKey
   showDecrypting(container)
   try {
     await unlockArchive(cid, payload, accessKey.slice())
   } catch (error) {
+    // Replaced meanwhile: closing the share already zeroed this key, and linkKey may now be the next link's
+    if (isStale(since)) return
     if (error instanceof NotAvailableError) {
       showLinkError(container, unlockErrorMessage(error), () => void unlockWithKey(cid, payload, accessKey))
       return
@@ -240,12 +272,46 @@ async function unlockWithKey(cid: string, payload: Uint8Array, accessKey: Uint8A
     }
     return
   }
-  forgetLinkKey()
+  if (!isStale(since)) forgetLinkKey()
 }
 
-function init(): void {
+// Ends the current share: aborts its requests, closes its archive (zeroing the piece key), forgets the link's key, and
+// frees its object URLs. Work still running for it sees the new generation and stops. Finished saves are left alone:
+// the browser may still be copying them, and the next save or leaving the page deletes them.
+function closeShare(): void {
+  generation++
+  shareRequests.abort()
+  shareRequests = new AbortController()
+  const archive = activeArchive
+  activeArchive = undefined
+  void archive?.close()
+  forgetLinkKey()
+  revokeRenderedObjectUrls(container)
+  revokePdfObjectUrls()
+}
+
+function leavePage(): void {
+  closeShare()
+  shownAddress = undefined
+  revokeStagedUrl()
+  void removeOwnStagedFiles()
+}
+
+// The share on screen, as its link without `k` (`#v1/<cid>&d=…`); undefined when no share is shown.
+let shownAddress: string | undefined
+
+// Opens the share in the address bar's fragment, at startup and on every fragment change (a pasted link, Back or
+// Forward), after closing the one on screen.
+function openShare(): void {
   const hash = window.location.hash
   const fragment = parseFragment(hash)
+  // `k` is always last
+  const address = fragment?.key ? hash.slice(0, hash.indexOf('&k=')) : hash
+  if (fragment && !fragment.key && address === shownAddress) return
+
+  closeShare()
+  container.classList.remove('wide')
+  shownAddress = fragment ? address : undefined
   if (!fragment) {
     showMissingLink(container)
     return
@@ -253,28 +319,27 @@ function init(): void {
 
   const { cid, payload, key } = fragment
   if (key) {
-    // Before any request: a reload or a copy of the address no longer carries the key. `k` is always last.
-    history.replaceState(null, '', hash.slice(0, hash.indexOf('&k=')))
+    // Before any request: a reload or a copy of the address no longer carries the key. The entry only records that it
+    // had one, so a reload can say why the prompt is back.
+    history.replaceState({ keyRemoved: true }, '', address)
     void unlockWithKey(cid, payload, key)
     return
   }
-  showAccessKeyPrompt(container, (accessKey) => unlockArchive(cid, payload, accessKey))
+  const keyRemoved = (history.state as { keyRemoved?: unknown } | null)?.keyRemoved === true
+  showAccessKeyPrompt(
+    container,
+    (accessKey) => unlockArchive(cid, payload, accessKey),
+    keyRemoved ? KEY_REMOVED_MESSAGE : undefined
+  )
 }
 
-window.addEventListener(
-  'pagehide',
-  () => {
-    const archive = activeArchive
-    activeArchive = undefined
-    void archive?.close()
-    forgetLinkKey()
-    revokePdfObjectUrls()
-    revokeStagedUrl()
-    void removeOwnStagedFiles()
-  },
-  { once: true }
-)
+window.addEventListener('hashchange', openShare)
+window.addEventListener('pagehide', leavePage)
+// Back to this page from the back-forward cache: the share was closed on pagehide, so open it again
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) openShare()
+})
 
 // A save staged by an earlier page is only deleted by a later save, startup or pagehide, see opfs-save.ts
 void removeStagedFiles()
-init()
+openShare()
