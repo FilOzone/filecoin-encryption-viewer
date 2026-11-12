@@ -38,8 +38,6 @@ async function stubFetch() {
   return { fetchFn, hashes }
 }
 
-const openPage = loadPage
-
 function submitKey(text: string): void {
   ;(app().querySelector('#access-key') as HTMLInputElement).value = text
   app()
@@ -62,7 +60,7 @@ describe('a link that carries its Access key', () => {
     const replaceState = vi.spyOn(window.history, 'replaceState')
     const link = `#v1/${CID}&d=${b64(await make())}`
 
-    await openPage(`${link}&k=${ACCESS_KEY_TEXT}`)
+    await loadPage(`${link}&k=${ACCESS_KEY_TEXT}`)
     await waitFor(() => app().querySelector('button.tree-file'))
 
     expect(app().querySelector('#access-key')).toBeNull()
@@ -77,7 +75,7 @@ describe('a link that carries its Access key', () => {
     const { fetchFn } = await stubFetch()
     const wrongKey = encodeAccessKey(new Uint8Array(32).fill(0x44))
 
-    await openPage(`#v1/${CID}&d=${LINK_DATA}&k=${wrongKey}`)
+    await loadPage(`#v1/${CID}&d=${LINK_DATA}&k=${wrongKey}`)
     await waitFor(() => app().querySelector('#access-key'))
 
     expect(errorText()).toBe(KEY_FAILED)
@@ -90,7 +88,7 @@ describe('a link that carries its Access key', () => {
 
   it('treats an all-zero key like a wrong key', async () => {
     const { fetchFn } = await stubFetch()
-    await openPage(`#v1/${CID}&d=${LINK_DATA}&k=fak1_${'A'.repeat(43)}`)
+    await loadPage(`#v1/${CID}&d=${LINK_DATA}&k=fak1_${'A'.repeat(43)}`)
     await waitFor(() => app().querySelector('#access-key'))
     expect(errorText()).toBe(KEY_FAILED)
     expect(fetchFn).not.toHaveBeenCalled()
@@ -99,7 +97,7 @@ describe('a link that carries its Access key', () => {
   it('shows an expired share as final: its message, no prompt and no Try again', async () => {
     const { fetchFn } = await stubFetch()
     const expired = await delivery({ expires: Math.floor(Date.now() / 1000) - 3600 })
-    await openPage(`#v1/${CID}&d=${b64(expired)}&k=${ACCESS_KEY_TEXT}`)
+    await loadPage(`#v1/${CID}&d=${b64(expired)}&k=${ACCESS_KEY_TEXT}`)
     await waitFor(() => app().querySelector('#link-error'))
     expect(app().querySelector('#link-error')?.textContent).toBe(
       'This share has expired. Ask the sender for a new link.'
@@ -111,7 +109,7 @@ describe('a link that carries its Access key', () => {
 
   it("shows the gateway's installer page as final: its message and no Try again", async () => {
     vi.stubGlobal('fetch', serveRange(await makeShare(files), 'installer').fetch)
-    await openPage(`#v1/${CID}&d=${LINK_DATA}&k=${ACCESS_KEY_TEXT}`)
+    await loadPage(`#v1/${CID}&d=${LINK_DATA}&k=${ACCESS_KEY_TEXT}`)
     await waitFor(() => app().querySelector('#link-error'))
     expect(app().querySelector('#link-error')?.textContent).toBe(
       "This page isn't connected to the Filecoin gateway yet. Open the link again, or reload the page."
@@ -137,7 +135,7 @@ describe('a link that carries its Access key', () => {
     const link = `#v1/${CID}&d=${LINK_DATA}`
 
     try {
-      await openPage(`${link}&k=${ACCESS_KEY_TEXT}`)
+      await loadPage(`${link}&k=${ACCESS_KEY_TEXT}`)
       const retry = await waitFor(() => app().querySelector<HTMLButtonElement>('#retry-btn'))
       expect(app().querySelector('#link-error')?.textContent).toBe(
         "This share isn't available yet, or the download was interrupted. Try again in a few minutes."
@@ -160,7 +158,7 @@ describe('a link that carries its Access key', () => {
 describe('a link without its Access key', () => {
   it('shows the prompt and fetches nothing until a key is entered', async () => {
     const { fetchFn } = await stubFetch()
-    await openPage(`#v1/${CID}&d=${LINK_DATA}`)
+    await loadPage(`#v1/${CID}&d=${LINK_DATA}`)
     await waitFor(() => app().querySelector('#access-key'))
     expect((app().querySelector('#error') as HTMLElement).hidden).toBe(true)
     expect(fetchFn).not.toHaveBeenCalled()
@@ -169,13 +167,13 @@ describe('a link without its Access key', () => {
   it('says why the prompt is back after a reload of a link whose key was removed, and stores no key', async () => {
     const { fetchFn } = await stubFetch()
     const link = `#v1/${CID}&d=${LINK_DATA}`
-    await openPage(`${link}&k=${ACCESS_KEY_TEXT}`)
+    await loadPage(`${link}&k=${ACCESS_KEY_TEXT}`)
     await waitFor(() => app().querySelector('button.tree-file'))
     expect(history.state).toEqual({ keyRemoved: true })
     fetchFn.mockClear()
 
     unloadPage()
-    await openPage(window.location.hash, history.state)
+    await loadPage(window.location.hash, history.state)
     await waitFor(() => app().querySelector('#access-key'))
     expect(window.location.hash).toBe(link)
     expect(errorText()).toBe(
@@ -189,7 +187,7 @@ describe('a link without its Access key', () => {
 
   it('refuses a wrong key without fetching, then opens with the right one', async () => {
     const { fetchFn } = await stubFetch()
-    await openPage(`#v1/${CID}&d=${LINK_DATA}`)
+    await loadPage(`#v1/${CID}&d=${LINK_DATA}`)
     await waitFor(() => app().querySelector('#access-key'))
 
     submitKey(encodeAccessKey(new Uint8Array(32).fill(0x44)))
@@ -204,7 +202,7 @@ describe('a link without its Access key', () => {
     'shows the incomplete-link screen for %j',
     async (hash) => {
       const { fetchFn } = await stubFetch()
-      await openPage(hash)
+      await loadPage(hash)
       expect(app().textContent).toContain('This link is incomplete.')
       expect(fetchFn).not.toHaveBeenCalled()
     }

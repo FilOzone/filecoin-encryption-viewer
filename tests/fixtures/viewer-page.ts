@@ -11,7 +11,7 @@ const listeners: [string, EventListenerOrEventListenerObject][] = []
  */
 export async function loadPage(hash: string, state: unknown = null): Promise<void> {
   vi.resetModules()
-  document.body.innerHTML = '<div id="app"></div>'
+  document.body.innerHTML = '<div id="card-label"></div><div id="app"></div>'
   history.replaceState(state, '', hash)
   const add = vi.spyOn(window, 'addEventListener')
   try {
