@@ -49,7 +49,11 @@ async function closeArchive(archive: ProtectedArchive): Promise<void> {
   await archive.close()
 }
 
-const fileName = (entry: ProtectedEntry) => entry.path.split('/').at(-1) ?? 'Decrypted file'
+// A name of only spaces or dots would leave the browser to pick its own download name
+function fileName(entry: ProtectedEntry): string {
+  const name = entry.path.slice(entry.path.lastIndexOf('/') + 1)
+  return /^[\s.]*$/.test(name) ? 'Decrypted file' : name
+}
 
 async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry, closeAfterOpen = false): Promise<void> {
   if (entry.directory) return
@@ -87,7 +91,7 @@ async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry, c
               contentType: entry.contentType,
               open: () => archive.open(entry.path),
             },
-            entry.path.split('/').at(-1) ?? 'decrypted-content',
+            fileName(entry),
             onProgress
           )
         )

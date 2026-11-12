@@ -82,6 +82,22 @@ describe('isBinaryPreviewType', () => {
 })
 
 describe('renderContent', () => {
+  it.each([
+    ['image', bytes(0x89, 0x50, 0x4e, 0x47), 'image/png', '假期 照片.png'],
+    ['video', bytes(0x00, 0x00, 0x00, 0x18), 'video/mp4', 'clip.mp4'],
+    ['text', new TextEncoder().encode('hello'), 'text/plain', 'notes'],
+    ['SVG shown as text', new TextEncoder().encode('<svg/>'), 'image/svg+xml', 'logo.svg'],
+    ['unknown', new Uint8Array(4), 'application/octet-stream', 'data "v2".bin'],
+  ])('downloads %s with its original name', (_kind, data, type, name) => {
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    const container = { classList: { add: vi.fn(), remove: vi.fn() }, innerHTML: '' } as unknown as HTMLElement
+
+    renderContent(container, data, type, name)
+
+    const download = /download="([^"]*)"/.exec(container.innerHTML)?.[1]
+    expect(download).toBe(name.replace(/"/g, '&quot;'))
+  })
+
   it('renders buffered video with playback controls and a download link', () => {
     const createObjectURL = vi.fn(() => 'blob:video')
     vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })

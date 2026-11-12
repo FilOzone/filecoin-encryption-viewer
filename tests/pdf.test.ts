@@ -42,7 +42,7 @@ describe('PDF view', () => {
     expect(html).toContain('>Download</a>')
     expect(blobs[0].type).toBe('application/pdf')
     // the Download link is a separate octet-stream blob
-    expect(html).toContain('href="blob:test-2" download="decrypted-content.pdf"')
+    expect(html).toContain('href="blob:test-2" download="report.pdf"')
     expect(blobs[1].type).toBe('application/octet-stream')
   })
 
