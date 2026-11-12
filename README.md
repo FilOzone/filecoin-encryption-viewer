@@ -23,8 +23,8 @@ A single-file browser viewer for encrypted Filecoin uploads (`filecoin-pin add -
 
 A demo folder on the calibration network, shared with `filecoin-pin get-share-link`, in both kinds of link:
 
-- **[Open link](https://bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEEpYpt3hrdlaAnCiP4YiwKDXozDXfeemRczk0aEHp0rJVwu-5t6TszxNiCbk0qPTBAB0_fYIzUBWG6M3DYE7nkXAVMkxAhCxk_8kqJrukEBlgwSIRvPBRWpfeNsXJfJBjZ9GRZanVKk1AbL3wHJcGZKsJV0uY75TFJMK5Rjv1iLjRr&k=fak1_Qu3jLRHpui6T3_k7cvhr3F1uHugu16fETsJrN8MKCPk)**: carries its Access key, so it opens without a prompt.
-- **[Restricted link](https://bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEE7YM_C2ak6J1pHLoyjTIE3qtXUMO1ew0XpS7jJLUS2zACh0ktqF1KJbtNERiaZhknsGD-MwBAqT3UlyaMCYx3PgVMLGj6m6OtUqLU3T00BlgwvXMm9WJ9vCMblw_uiYFdAQgwrxkVxsbRJOT9I6g9UXHCfDZJQ11Il6Jz-u4p4oqR)**: asks for its Access key, `fak1_txekkuXRme36QrbqRN_uvG91DBa8OhpCJShw8MsJcEg`.
+- **[Open link](https://bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEEpYpt3hrdlaAnCiP4YiwKDXozDXfeemRczk0aEHp0rJVwu-5t6TszxNiCbk0qPTBAB0_fYIzUBWG6M3DYE7nkXAVMkxAhCxk_8kqJrukEBlgwSIRvPBRWpfeNsXJfJBjZ9GRZanVKk1AbL3wHJcGZKsJV0uY75TFJMK5Rjv1iLjRr&k=fak1_Qu3jLRHpui6T3_k7cvhr3F1uHugu16fETsJrN8MKCPk)**: carries its Access key, so it opens without a prompt.
+- **[Restricted link](https://bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEE7YM_C2ak6J1pHLoyjTIE3qtXUMO1ew0XpS7jJLUS2zACh0ktqF1KJbtNERiaZhknsGD-MwBAqT3UlyaMCYx3PgVMLGj6m6OtUqLU3T00BlgwvXMm9WJ9vCMblw_uiYFdAQgwrxkVxsbRJOT9I6g9UXHCfDZJQ11Il6Jz-u4p4oqR)**: asks for its Access key, `fak1_txekkuXRme36QrbqRN_uvG91DBa8OhpCJShw8MsJcEg`.
 
 > [!WARNING]
 > This Access key is public only because it's a demo. For a real share, send the Access key on a separate channel from the link, never next to it.
@@ -195,7 +195,7 @@ filecoin-pin add dist/index.html --dry-run   # prints the root CID without uploa
 
 | Commit | Viewer CID | Network |
 |---|---|---|
-| `9b141cb` | `bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy` | mainnet |
+| `0a0b8b5` | `bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64` | mainnet |
 
 ## Credits
 
