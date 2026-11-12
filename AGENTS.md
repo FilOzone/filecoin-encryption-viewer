@@ -48,9 +48,9 @@ The real path (the inbrowser.link service worker intercepting `https://<cid>.ipf
 
 ## Releases and CI
 
-- `.github/workflows/ci.yml` runs the four checks on every PR and push to `main`, then a dry-run upload (no wallet) that comments the PR's viewer CID. Fork PRs get the checks only.
+- `.github/workflows/ci.yml` runs the four checks on every PR and push to `main`, then a dry-run upload (no wallet). The PR's viewer CID shows in the "Filecoin Upload" check and in the run summary; the dry run posts no PR comment. Fork PRs get the checks only.
 - `.github/workflows/release.yml` runs on push to `main`:
-  - `release-please` (`release-please-config.json`, `always-update`) opens or updates the release PR, and `release-pr-readme` commits that build's CID to README.md's "Verifiable build" table, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs **no** CI checks or dry-run comment on them.
+  - `release-please` (`release-please-config.json`, `always-update`) opens or updates the release PR, and `release-pr-readme` commits that build's CID to README.md's "Verifiable build" table, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs **no** CI checks or dry-run upload on them.
   - Merging the release PR tags it. `deploy-check` (no secrets) builds the released commit, fails if its CID differs from the README row, and uploads the build as an artifact. It deploys only when the CID differs from the previous row in the table, so a release that doesn't change the viewer deploys nothing, and a rollback stays until one does.
   - `publish` uploads that artifact (no rebuild) to mainnet, skipping the upload when cid.contact already lists it, waits for cid.contact, refuses unless the tag is the latest release, and points the DNSLink TXT record `_dnslink.viewer.filecoin.cloud` at the CID (no PATCH if it already does), then verifies over DNS-over-HTTPS. `release-notes` adds the new and previous CID to the GitHub release once.
 - `.github/workflows/rollback.yml` (manual, input `cid`) points the DNSLink at a CID that's in the README table and indexed.

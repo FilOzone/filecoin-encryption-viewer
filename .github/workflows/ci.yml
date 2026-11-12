@@ -18,8 +18,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      # The upload action's dry run comments the viewer CID on the PR and adds a check run.
-      pull-requests: write
+      # The upload action's dry run adds a "Filecoin Upload" check run with the viewer CID; it posts no PR comment.
+      pull-requests: read
       checks: write
       actions: read
     # The repo is checked out into viewer/, so the workspace root has no package.json: the upload action sets up its own
@@ -54,8 +54,8 @@ jobs:
           cid="$(node scripts/release.ts cid)"
           echo "Viewer CID: \`$cid\`" >> "$GITHUB_STEP_SUMMARY"
 
-      # No wallet: packs dist/index.html and comments the CID it would publish. The action refuses fork PRs, whose
-      # read-only token couldn't comment anyway, so they only get the checks above.
+      # No wallet: packs dist/index.html and reports the CID it would publish in the "Filecoin Upload" check. The action
+      # refuses fork PRs, so they only get the checks above.
       - name: Dry-run upload
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: filecoin-project/filecoin-pin/upload-action@73aef90c36ab7f3d3907b15315dbc3e4fd1b41e6 # v2.3.0
