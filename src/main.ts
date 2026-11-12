@@ -1,6 +1,5 @@
 import type { ProtectedArchive, ProtectedEntry } from './car-archive.js'
 import { openProtectedArchive } from './car-archive.js'
-import { clearCardLabel } from './card-label.js'
 import { MAX_BINARY_PREVIEW_BYTES, MAX_DOCUMENT_PREVIEW_BYTES, readEntryPrefix, readInlineEntry } from './decrypt.js'
 import { NotAvailableError, RangeUnsupportedError, WrongAccessKeyError } from './errors.js'
 import { parseFragment } from './fragment.js'
@@ -37,10 +36,13 @@ const container = getContainer()
 let activeArchive: ProtectedArchive | undefined
 const folderState = new Map<string, boolean>()
 
-// Bumped each time a share is opened or closed. Async work notes it when it starts, and once it no longer matches
-// (another link was opened), that work stops without touching the page.
+// Bumped each time a share is closed. Async work notes it when it starts, and once it no longer matches (another link
+// was opened), that work stops without touching the page.
 let generation = 0
 const isStale = (since: number) => since !== generation
+
+// Aborted when the share is closed: its requests stop, including the body of a 200 still offered as encrypted.fee
+let shareRequests = new AbortController()
 
 async function closeArchive(archive: ProtectedArchive): Promise<void> {
   if (activeArchive === archive) activeArchive = undefined
@@ -210,9 +212,11 @@ async function unlockArchive(cid: string, payload: Uint8Array, accessKey: Uint8A
 async function unlock(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
   const startedAt = performance.now()
   const since = generation
-  const archive = import.meta.env.DEV
-    ? await openProtectedArchive(cid, payload, accessKey, devFetch())
-    : await openProtectedArchive(cid, payload, accessKey)
+  const { signal } = shareRequests
+  const fetchFn = import.meta.env.DEV ? devFetch() : fetch
+  const archive = await openProtectedArchive(cid, payload, accessKey, (input, init) =>
+    fetchFn(input, { ...init, signal })
+  )
   if (import.meta.env.DEV)
     devLog(`archive ready (payload + head + metadata + decrypt + listing): ${elapsed(startedAt)}`)
   // Opened for a share that was replaced meanwhile: close it at once (zeroing its key), it never becomes active
@@ -271,16 +275,24 @@ async function unlockWithKey(cid: string, payload: Uint8Array, accessKey: Uint8A
   if (!isStale(since)) forgetLinkKey()
 }
 
-// Ends the current share: closes its archive (zeroing the piece key), forgets the link's key, and frees its object
-// URLs and staged files. Work still running for it sees the new generation and stops.
+// Ends the current share: aborts its requests, closes its archive (zeroing the piece key), forgets the link's key, and
+// frees its object URLs. Work still running for it sees the new generation and stops. Finished saves are left alone:
+// the browser may still be copying them, and the next save or leaving the page deletes them.
 function closeShare(): void {
   generation++
+  shareRequests.abort()
+  shareRequests = new AbortController()
   const archive = activeArchive
   activeArchive = undefined
   void archive?.close()
   forgetLinkKey()
   revokeRenderedObjectUrls(container)
   revokePdfObjectUrls()
+}
+
+function leavePage(): void {
+  closeShare()
+  shownAddress = undefined
   revokeStagedUrl()
   void removeOwnStagedFiles()
 }
@@ -298,8 +310,6 @@ function openShare(): void {
   if (fragment && !fragment.key && address === shownAddress) return
 
   closeShare()
-  folderState.clear()
-  clearCardLabel()
   container.classList.remove('wide')
   shownAddress = fragment ? address : undefined
   if (!fragment) {
@@ -324,7 +334,11 @@ function openShare(): void {
 }
 
 window.addEventListener('hashchange', openShare)
-window.addEventListener('pagehide', closeShare, { once: true })
+window.addEventListener('pagehide', leavePage)
+// Back to this page from the back-forward cache: the share was closed on pagehide, so open it again
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) openShare()
+})
 
 // A save staged by an earlier page is only deleted by a later save, startup or pagehide, see opfs-save.ts
 void removeStagedFiles()
