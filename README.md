@@ -190,20 +190,22 @@ Recipients trust this page with their Access key, so anyone should be able to ch
 git checkout <tag>
 pnpm install --frozen-lockfile
 pnpm build
-filecoin-pin add dist/index.html --dry-run   # prints the root CID without uploading
+node scripts/release.ts cid   # the CID of dist/ as a folder holding index.html
 ```
+
+Releases are published as a folder holding `index.html`, with [filoz-webmaster](https://github.com/FilOzone/filoz-webmaster), so their CIDs start with `bafybei`. The older `bafkrei` rows are the file on its own. Both open the same way, at `https://<cid>.ipfs.inbrowser.link/`.
 
 The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-filecoin-cloud.ipns.inbrowser.link/`, which serves the build named by the [DNSLink](https://dnslink.dev) record `_dnslink.viewer.filecoin.cloud`. Releases are made by CI:
 
-1. Each push to `main` updates a release PR (version bump and changelog), and CI commits that build's CID to the table below, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs no CI checks on them; their commits were checked on `main`.
-2. Merging the release PR tags the release, and CI builds the released commit, failing if its CID differs from the table. A release deploys only when it changes the viewer, that is, when its CID differs from the previous row; a rollback stays until then.
-3. To deploy, a maintainer approves, and CI uploads that build to mainnet, waits until [cid.contact](https://cid.contact) indexes it, then points the DNSLink record at it. The release notes record the new and the previous CID.
+1. Each push to `main` updates a release PR (version bump and changelog), and CI commits that build's CID to the table below, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs no CI checks on them.
+2. Merging the release PR tags the release. CI runs the checks on the released commit, builds it, and fails if its CID differs from the table. A release deploys only when it changes the viewer, that is, when its CID differs from the previous row; a rollback stays until then.
+3. CI uploads that build to mainnet with the release wallet. A maintainer then approves the DNSLink switch: CI waits until [cid.contact](https://cid.contact) indexes the CID and points the DNSLink record at it. The release notes record the new and the previous CID.
 
 | Release | Viewer CID | Network |
 |---|---|---|
 | `0a0b8b5` | `bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64` | mainnet |
 
-The `9b141cb` row predates releases, so it names a commit. To point the stable URL back at a recorded build, run the **Rollback** workflow with its CID.
+The `0a0b8b5` row predates releases, so it names a commit. To point the stable URL back at a recorded build, run the **Rollback** workflow with its CID.
 
 ## Credits
 

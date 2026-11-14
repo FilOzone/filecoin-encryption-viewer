@@ -9,7 +9,7 @@
       "include-v-in-tag": true,
       "include-component-in-tag": false,
       "pull-request-header": "Viewer release",
-      "pull-request-footer": "\n\n## What merging does\n\n1. release-please tags this version and creates its GitHub release.\n2. The **Release** workflow rebuilds the released commit and fails if its viewer CID differs from the README row for this tag.\n3. A release deploys only when it changes the viewer, that is, when its CID differs from the previous row in the README table. Otherwise nothing is uploaded and no approval is asked, and a rollback stays in place until a release changes the viewer.\n4. To deploy, a maintainer approves the `release` environment. CI uploads `dist/index.html` to Filecoin **mainnet**, waits until cid.contact indexes it, and points the DNSLink record `_dnslink.viewer.filecoin.cloud` at it, so https://viewer.filecoin.cloud/ serves the new build. The release notes record the new and the previous CID; the **Rollback** workflow switches back.\n\nfilecoin-pin's `DEFAULT_VIEWER_URL` stays `https://viewer.filecoin.cloud/` and needs no change.\n\nThis PR is opened and updated with `GITHUB_TOKEN`, so GitHub runs **no** CI checks or dry-run upload on it, including on CI's README commit. The commits it releases were checked on `main`.",
+      "pull-request-footer": "Merging this releases it. See the README's [Verifiable build](https://github.com/FilOzone/filecoin-encryption-viewer#verifiable-build) for what CI does next.",
       "changelog-sections": [
         {
           "type": "feat",

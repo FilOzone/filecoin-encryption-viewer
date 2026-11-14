@@ -48,17 +48,16 @@ The real path (the inbrowser.link service worker intercepting `https://<cid>.ipf
 
 ## Releases and CI
 
-- `.github/workflows/ci.yml` runs the four checks on every PR and push to `main`, then a dry-run upload (no wallet). The PR's viewer CID shows in the "Filecoin Upload" check and in the run summary; the dry run posts no PR comment. Fork PRs get the checks only.
-- `.github/workflows/release.yml` runs on push to `main`:
-  - `release-please` (`release-please-config.json`, `always-update`) opens or updates the release PR, and `release-pr-readme` commits that build's CID to README.md's "Verifiable build" table, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs **no** CI checks or dry-run upload on them.
-  - Merging the release PR tags it. `deploy-check` (no secrets) builds the released commit, fails if its CID differs from the README row, and uploads the build as an artifact. It deploys only when the CID differs from the previous row in the table, so a release that doesn't change the viewer deploys nothing, and a rollback stays until one does.
-  - `publish` uploads that artifact (no rebuild) to mainnet, skipping the upload when cid.contact already lists it, waits for cid.contact, refuses unless the tag is the latest release, and points the DNSLink TXT record `_dnslink.viewer.filecoin.cloud` at the CID (no PATCH if it already does), then verifies over DNS-over-HTTPS. `release-notes` adds the new and previous CID to the GitHub release once.
-- `.github/workflows/rollback.yml` (manual, input `cid`) points the DNSLink at a CID that's in the README table and indexed.
-- `publish` and `rollback` share the `dnslink` concurrency group: one at a time, and a newer queued run replaces an older queued one, which never starts, so the viewer is left as it was, never half-switched.
-- `publish` and `rollback` run in the GitHub Environment `release`. Restrict it to the deployment branch `main`, with required reviewers and "Prevent self-review", or it's not a real gate. It holds the secrets `FILECOIN_WALLET_KEY` and `CLOUDFLARE_API_TOKEN` (Zone → DNS → Edit, `filecoin.cloud` only) and the variables `CLOUDFLARE_ZONE_ID` and `DNSLINK_RECORD_ID`. No other job may use them.
+README.md "Verifiable build" describes the release flow. For changes to it:
+
+- `ci.yml` runs the four checks on every PR and push to `main`, then filoz-webmaster's dry run, and fails if `scripts/release.ts cid` differs from the CID webmaster packs.
+- `release.yml`: `release-please` and `release-pr-readme` keep the release PR and its README row; on a release, `deploy-check` (no secrets) checks and builds it, `upload` (environment `upload`, the wallet key only) publishes it with webmaster, `dnslink` (environment `release`, the Cloudflare token only, approval required) waits for cid.contact and switches the DNSLink, and `release-notes` records the CIDs. `rollback.yml` switches the DNSLink back, in the `release` environment.
+- Never put the wallet key and the Cloudflare token in the same job: a job's steps share one runner, and the upload runs third-party code.
+- Environments, both limited to the deployment branch `main`:
+  - `upload`: the secret `FILECOIN_WALLET_KEY`.
+  - `release`: required reviewers and "Prevent self-review"; the secret `CLOUDFLARE_API_TOKEN` (Zone → DNS → Edit, `filecoin.cloud` only) and the variables `CLOUDFLARE_ZONE_ID` and `DNSLINK_RECORD_ID`.
 - The repo setting "Allow GitHub Actions to create and approve pull requests" must be on for release-please.
 - The logic lives in `scripts/release.ts` (tested in `tests/release.test.ts`), not in the workflow YAML. Pin every action by commit SHA.
-- `https://viewer.filecoin.cloud/` redirects to `https://viewer-filecoin-cloud.ipns.inbrowser.link/`, which resolves the DNSLink. filecoin-pin's `DEFAULT_VIEWER_URL` is `https://viewer.filecoin.cloud/`, so releases never change it.
 
 ## Rules
 
