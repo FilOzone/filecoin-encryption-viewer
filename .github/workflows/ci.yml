@@ -16,32 +16,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: read
-      # The upload action's dry run adds a "Filecoin Upload" check run with the viewer CID; it posts no PR comment.
-      pull-requests: read
-      checks: write
-      actions: read
-    # The repo is checked out into viewer/, so the workspace root has no package.json: the upload action sets up its own
-    # pnpm with pnpm/action-setup, which also reads the root package.json's packageManager and refuses two versions.
-    defaults:
-      run:
-        working-directory: viewer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: viewer
           persist-credentials: false
 
       # Node 24 and pnpm 10.7.0 (packageManager): another toolchain can change the viewer CID.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: viewer/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: viewer/.nvmrc
+          node-version-file: .nvmrc
           cache: pnpm
-          cache-dependency-path: viewer/pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
@@ -49,17 +34,21 @@ jobs:
       - run: pnpm build
       - run: pnpm exec biome check .
 
+      # No wallet and no secrets, so fork PRs run it too: packs dist/ as a release would and reports its root CID.
+      - name: Dry-run publish
+        id: webmaster
+        uses: FilOzone/filoz-webmaster@5aa0da17c4e30e23601826cbeeaba203a451c031 # FilOzone/filoz-webmaster#3
+        with:
+          path: dist
+          dry-run: "true"
+
       - name: Viewer CID
+        env:
+          PACKED: ${{ steps.webmaster.outputs.cid }}
         run: |
           cid="$(node scripts/release.ts cid)"
+          if [ "$cid" != "$PACKED" ]; then
+            echo "::error::scripts/release.ts computes $cid, but webmaster packs $PACKED"
+            exit 1
+          fi
           echo "Viewer CID: \`$cid\`" >> "$GITHUB_STEP_SUMMARY"
-
-      # No wallet: packs dist/index.html and reports the CID it would publish in the "Filecoin Upload" check. The action
-      # refuses fork PRs, so they only get the checks above.
-      - name: Dry-run upload
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: filecoin-project/filecoin-pin/upload-action@73aef90c36ab7f3d3907b15315dbc3e4fd1b41e6 # v2.3.0
-        with:
-          path: viewer/dist/index.html
-          network: mainnet
-          dryRun: "true"

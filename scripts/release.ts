@@ -3,6 +3,8 @@
 // Usage: node scripts/release.ts <command> [...args]; see `commands` at the bottom. Logs go to stderr, results to stdout.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import * as dagPb from '@ipld/dag-pb'
+import { UnixFS } from 'ipfs-unixfs'
 import { CID } from 'multiformats/cid'
 import * as raw from 'multiformats/codecs/raw'
 import { sha256 } from 'multiformats/hashes/sha2'
@@ -12,21 +14,27 @@ export const VIEWER_URL = 'https://viewer.filecoin.cloud/'
 const IPNS_URL = 'https://viewer-filecoin-cloud.ipns.inbrowser.link/'
 const README_HEADER = '| Release | Viewer CID | Network |'
 const REQUEST_TIMEOUT_MS = 15_000
-// filecoin-pin packs with the unixfs-v1-2025 profile: 1 MiB chunks, and a file that fits in one becomes one raw block
+// filoz-webmaster packs dist/ with @helia/unixfs: 1 MiB chunks, and a file that fits in one becomes one raw block
 const MAX_RAW_BLOCK_BYTES = 1_048_576
 
 export type Poll = { attempts: number; intervalMs: number }
 export type Cloudflare = { token: string; zoneId: string; recordId: string }
 
 /**
- * CIDv1 of a single file of at most 1 MiB, which filecoin-pin packs as one raw block. A bigger file becomes a multi-block
- * UnixFS file with another CID, so it fails here instead of producing a CID that the upload won't match.
+ * CID of the folder filoz-webmaster publishes: a UnixFS directory holding only `index.html`, a file of at most 1 MiB
+ * that packs as one raw block. A bigger file becomes a multi-block UnixFS file with another CID, so it fails here
+ * instead of producing a CID that the upload won't match.
  */
 export async function viewerCid(bytes: Uint8Array): Promise<string> {
   if (bytes.length > MAX_RAW_BLOCK_BYTES) {
-    throw new Error(`viewer is ${bytes.length} bytes, over 1 MiB: a raw-block CID would be wrong; use the packed CAR's`)
+    throw new Error(`viewer is ${bytes.length} bytes, over 1 MiB: it no longer packs as one block; use webmaster's CID`)
   }
-  return CID.create(1, raw.code, await sha256.digest(bytes)).toString()
+  const file = CID.create(1, raw.code, await sha256.digest(bytes))
+  const folder = dagPb.prepare({
+    Data: new UnixFS({ type: 'directory' }).marshal(),
+    Links: [{ Name: 'index.html', Hash: file, Tsize: bytes.length }],
+  })
+  return CID.create(1, dagPb.code, await sha256.digest(dagPb.encode(folder))).toString()
 }
 
 /**
@@ -210,7 +218,7 @@ const readmePath = fileURLToPath(new URL('../README.md', import.meta.url))
 const fewTries: Poll = { attempts: 3, intervalMs: 5_000 }
 
 const commands: Record<string, (args: string[]) => Promise<string | undefined>> = {
-  /** cid [file]: prints the viewer CID of dist/index.html. */
+  /** cid [file]: prints the viewer CID: the folder webmaster publishes for dist/index.html. */
   cid: async ([file = 'dist/index.html']) => viewerCid(readFileSync(file)),
   /** readme-get <tag>: prints the README CID recorded for a release tag; fails if there's none. */
   'readme-get': async ([tag]) => {

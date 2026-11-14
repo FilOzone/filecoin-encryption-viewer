@@ -85,9 +85,9 @@ jobs:
           GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
             GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" git push origin "HEAD:$BRANCH"
 
-  # No secrets. Builds the released commit once, for publish to upload, and decides whether to deploy: only when the
-  # CID differs from the previous row in the README table. A release that doesn't change the viewer deploys nothing, so
-  # a rollback stays in place until one does.
+  # No secrets. Checks and builds the released commit once, for upload to publish, and decides whether to deploy: only
+  # when the CID differs from the previous row in the README table. A release that doesn't change the viewer deploys
+  # nothing, so a rollback stays in place until one does.
   deploy-check:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
@@ -110,6 +110,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Release PRs get no checks, so the released commit is checked here before it's built.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm exec biome check .
       - run: pnpm build
 
       - name: Compare with the README
@@ -139,11 +143,49 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-  publish:
+  # Only the wallet key, in the `upload` environment (main only, no reviewers). It runs third-party code (webmaster and
+  # its dependencies), so it never holds the Cloudflare token: that is the dnslink job's, on another runner.
+  upload:
     needs: [release-please, deploy-check]
     if: needs.deploy-check.outputs.deploy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
+    environment: upload
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      # deploy-check's build, not rebuilt here.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: viewer
+          path: dist
+
+      # Stores the folder on two providers, deposits from the wallet when it's short, and waits until a provider serves
+      # the CID. No dnslink-name: the DNSLink is switched by the dnslink job.
+      - name: Upload to mainnet
+        id: webmaster
+        uses: FilOzone/filoz-webmaster@5aa0da17c4e30e23601826cbeeaba203a451c031 # FilOzone/filoz-webmaster#3
+        with:
+          path: dist
+          private-key: ${{ secrets.FILECOIN_WALLET_KEY }}
+          network: mainnet
+
+      - name: Check the uploaded CID
+        env:
+          CID: ${{ needs.deploy-check.outputs.cid }}
+          UPLOADED: ${{ steps.webmaster.outputs.cid }}
+        run: |
+          if [ "$UPLOADED" != "$CID" ]; then
+            echo "::error::uploaded $UPLOADED, but deploy-check built $CID"
+            exit 1
+          fi
+
+  # Only the Cloudflare token, in the `release` environment, which holds the approval. Runs only scripts/release.ts.
+  dnslink:
+    needs: [release-please, deploy-check, upload]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
     environment: release
     # Shared with the Rollback workflow: one DNSLink change at a time. A newer queued run replaces an older queued one,
     # which then never starts, so the viewer is left as it was, never half-switched.
@@ -152,82 +194,22 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      actions: read
     outputs:
       previous: ${{ steps.dnslink.outputs.previous }}
-    # The repo is checked out into viewer/, so the workspace root has no package.json: the upload action sets up its own
-    # pnpm with pnpm/action-setup, which also reads the root package.json's packageManager and refuses two versions.
-    defaults:
-      run:
-        working-directory: viewer
     steps:
-      # Only for scripts/ and the lockfile; the viewer is deploy-check's build, not rebuilt here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.sha }}
-          path: viewer
           persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: viewer/package.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: viewer/.nvmrc
-      # scripts/release.ts needs only multiformats; no lifecycle scripts next to the wallet key.
+          node-version-file: .nvmrc
+      # Runtime dependencies only, and no lifecycle scripts next to the Cloudflare token.
       - run: pnpm install --frozen-lockfile --prod --ignore-scripts
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: viewer
-          path: viewer/dist
-
-      - name: Check the artifact's CID
-        env:
-          CID: ${{ needs.deploy-check.outputs.cid }}
-        run: |
-          cid="$(node scripts/release.ts cid)"
-          if [ "$cid" != "$CID" ]; then
-            echo "::error::the downloaded viewer is $cid, deploy-check built $CID"
-            exit 1
-          fi
-
-      # A re-run after a successful upload doesn't pay again.
-      - name: Check whether it's already indexed
-        id: indexed
-        env:
-          CID: ${{ needs.deploy-check.outputs.cid }}
-        run: |
-          if node scripts/release.ts wait-indexed "$CID" 0; then
-            echo "indexed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "indexed=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Upload to mainnet
-        id: upload
-        if: steps.indexed.outputs.indexed != 'true'
-        uses: filecoin-project/filecoin-pin/upload-action@73aef90c36ab7f3d3907b15315dbc3e4fd1b41e6 # v2.3.0
-        with:
-          path: viewer/dist/index.html
-          walletPrivateKey: ${{ secrets.FILECOIN_WALLET_KEY }}
-          network: mainnet
-          # Hardcoded spending limits (placeholders, maintainer to confirm).
-          minRunwayDays: "30"
-          maxBalance: "5.00"
-
-      - name: Check the uploaded CID
-        if: steps.indexed.outputs.indexed != 'true'
-        env:
-          CID: ${{ needs.deploy-check.outputs.cid }}
-          UPLOADED: ${{ steps.upload.outputs.ipfsRootCid }}
-          STATUS: ${{ steps.upload.outputs.uploadStatus }}
-        run: |
-          if [ "$STATUS" != uploaded ] || [ "$UPLOADED" != "$CID" ]; then
-            echo "::error::upload returned $UPLOADED ($STATUS), expected $CID (uploaded)"
-            exit 1
-          fi
-
+      # inbrowser.link finds providers through cid.contact, so the stable URL waits until it can load the new build.
       - name: Wait for cid.contact
         env:
           CID: ${{ needs.deploy-check.outputs.cid }}
@@ -263,13 +245,13 @@ jobs:
           CID: ${{ needs.deploy-check.outputs.cid }}
         run: node scripts/release.ts dnslink-verify "$CID"
 
-  # Separate from publish so the wallet-handling job never holds a token that can write to the repo.
+  # Separate so neither secret-holding job has a token that can write to the repo.
   release-notes:
-    needs: [release-please, deploy-check, publish]
-    # Also after a skipped publish (nothing to deploy), but never after a failed one.
+    needs: [release-please, deploy-check, dnslink]
+    # When there's nothing to deploy, or after a successful deploy; never after a failed upload or DNSLink switch.
     if: >-
       always() && needs.deploy-check.result == 'success' &&
-      (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+      (needs.deploy-check.outputs.deploy != 'true' || needs.dnslink.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -282,7 +264,7 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
           CID: ${{ needs.deploy-check.outputs.cid }}
           DEPLOYED: ${{ needs.deploy-check.outputs.deploy }}
-          PREVIOUS: ${{ needs.publish.outputs.previous }}
+          PREVIOUS: ${{ needs.dnslink.outputs.previous }}
         run: |
           body="$(gh release view "$TAG" --json body --jq .body)"
           if grep -q '^## Viewer$' <<< "$body"; then

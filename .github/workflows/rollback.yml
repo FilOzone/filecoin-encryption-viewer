@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       cid:
-        description: Viewer CID from README.md's Verifiable build table (bafkrei…)
+        description: Viewer CID from README.md's Verifiable build table (bafy… or bafkrei…)
         required: true
         type: string
 
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
-    # Shared with the Release workflow's publish job: one DNSLink change at a time. A newer queued run replaces an older
+    # Shared with the Release workflow's dnslink job: one DNSLink change at a time. A newer queued run replaces an older
     # queued one, which then never starts, so the viewer is left as it was, never half-switched.
     concurrency:
       group: dnslink
@@ -33,7 +33,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      # scripts/release.ts needs only multiformats; no lifecycle scripts next to the Cloudflare token.
+      # Runtime dependencies only, and no lifecycle scripts next to the Cloudflare token.
       - run: pnpm install --frozen-lockfile --prod --ignore-scripts
 
       - name: Check the CID is a recorded, indexed build

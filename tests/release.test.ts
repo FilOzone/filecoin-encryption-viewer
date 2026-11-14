@@ -35,15 +35,15 @@ afterEach(() => {
 })
 
 describe('viewerCid', () => {
-  it('is the raw-codec CIDv1 of the bytes', async () => {
-    // sha256 of "hello world" as a raw CIDv1, as `ipfs add --cid-version 1 --raw-leaves` prints it.
+  it('is the CID of a folder holding only index.html', async () => {
+    // filoz-webmaster's dry run prints this root CID for a folder whose index.html is "hello world".
     expect(await viewerCid(new TextEncoder().encode('hello world'))).toBe(
-      'bafkreifzjut3te2nhyekklss27nh3k72ysco7y32koao5eei66wof36n5e'
+      'bafybeifwn6digc5hnoyv7i2g5gp3usxurmmgqo75gefr5fncxkzb7ttsfy'
     )
   })
 
-  it('takes exactly 1 MiB and refuses one byte more, which filecoin-pin would split into a multi-block file', async () => {
-    await expect(viewerCid(new Uint8Array(1_048_576))).resolves.toMatch(/^bafkrei/)
+  it('takes exactly 1 MiB and refuses one byte more, which webmaster would split into a multi-block file', async () => {
+    await expect(viewerCid(new Uint8Array(1_048_576))).resolves.toMatch(/^bafybei/)
     await expect(viewerCid(new Uint8Array(1_048_577))).rejects.toThrow('over 1 MiB')
   })
 })
