@@ -46,6 +46,19 @@ All four checks must pass before work is done. `pnpm build` runs `scripts/check-
 
 The real path (the inbrowser.link service worker intercepting `https://<cid>.ipfs.inbrowser.link/` and fetching from storage providers; the host is never reached directly) can only be tested on the published Viewer.
 
+## Releases and CI
+
+README.md "Verifiable build" describes the release flow. For changes to it:
+
+- `ci.yml` runs the four checks on every PR and push to `main`, then filoz-webmaster's dry run, and fails if `scripts/release.ts cid` differs from the CID webmaster packs.
+- `release.yml`: `release-please` and `release-pr-readme` keep the release PR and its README row; on a release, `deploy-check` (no secrets) checks and builds it, `upload` (environment `upload`, the wallet key only) publishes it with webmaster, `dnslink` (environment `release`, the Cloudflare token only, approval required) waits for cid.contact and switches the DNSLink, and `release-notes` records the CIDs. `rollback.yml` switches the DNSLink back, in the `release` environment.
+- Never put the wallet key and the Cloudflare token in the same job: a job's steps share one runner, and the upload runs third-party code.
+- Environments, both limited to the deployment branch `main`:
+  - `upload`: the secret `FILECOIN_WALLET_KEY`.
+  - `release`: required reviewers and "Prevent self-review"; the secret `CLOUDFLARE_API_TOKEN` (Zone → DNS → Edit, `filecoin.cloud` only) and the variables `CLOUDFLARE_ZONE_ID` and `DNSLINK_RECORD_ID`.
+- The repo setting "Allow GitHub Actions to create and approve pull requests" must be on for release-please.
+- The logic lives in `scripts/release.ts` (tested in `tests/release.test.ts`), not in the workflow YAML. Pin every action by commit SHA.
+
 ## Rules
 
 - **The build is one self-contained HTML file.** No external requests except Range requests to `https://*.ipfs.inbrowser.link`, which the service worker intercepts. Don't add dependencies lightly, and keep everything inline.
