@@ -115,7 +115,6 @@ export function renderContent(
   } else {
     activeObjectUrls.set(container, previewUrl ? [previewUrl, objectUrl] : [objectUrl])
   }
-  const filename = 'decrypted-content'
   const header = fileHeader(displayName, title, contentType, data.byteLength)
 
   if (RASTER_IMAGE_TYPES.has(contentType)) {
@@ -123,7 +122,7 @@ export function renderContent(
     container.innerHTML = `
       <div class="content-wrapper">${header}
         <img src="${previewUrl}" alt="Decrypted image" style="max-width:100%;max-height:90vh;display:block;margin:0 auto;" />
-        <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(filename)}">Download</a>
+        <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(displayName)}">Download</a>
       </div>
     `
     return
@@ -135,7 +134,7 @@ export function renderContent(
     container.innerHTML = `
       <div class="content-wrapper">${header}
         <${tag} controls preload="metadata" src="${previewUrl}"></${tag}>
-        <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(filename)}">Download</a>
+        <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(displayName)}">Download</a>
       </div>
     `
     return
@@ -152,7 +151,7 @@ export function renderContent(
           </div>
         </div>
         <div class="pdf-actions">
-          <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(filename)}.pdf">Download</a>
+          <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(displayName)}">Download</a>
           <a class="btn-primary pdf-open" href="${previewUrl}" target="_blank" rel="noopener noreferrer">Open in new tab ${EXTERNAL_ICON}</a>
         </div>
         <p class="pdf-note">Opens in your browser's own PDF viewer. The file was decrypted on this device and is never uploaded.</p>
@@ -167,7 +166,7 @@ export function renderContent(
     container.innerHTML = `
       <div class="content-wrapper">${header}
         <pre>${escapeHtml(text)}</pre>
-        <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(filename)}.txt">Download</a>
+        <a class="btn-secondary" href="${objectUrl}" download="${escapeHtml(displayName)}">Download</a>
       </div>
     `
     return
@@ -175,7 +174,7 @@ export function renderContent(
 
   container.innerHTML = `
     <div class="content-wrapper">${header}
-      <a class="btn-primary" href="${objectUrl}" download="${escapeHtml(filename)}">Download file</a>
+      <a class="btn-primary" href="${objectUrl}" download="${escapeHtml(displayName)}">Download file</a>
     </div>
   `
 }

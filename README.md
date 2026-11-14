@@ -23,8 +23,8 @@ A single-file browser viewer for encrypted Filecoin uploads (`filecoin-pin add -
 
 A demo folder on the calibration network, shared with `filecoin-pin get-share-link`, in both kinds of link:
 
-- **[Open link](https://bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEEpYpt3hrdlaAnCiP4YiwKDXozDXfeemRczk0aEHp0rJVwu-5t6TszxNiCbk0qPTBAB0_fYIzUBWG6M3DYE7nkXAVMkxAhCxk_8kqJrukEBlgwSIRvPBRWpfeNsXJfJBjZ9GRZanVKk1AbL3wHJcGZKsJV0uY75TFJMK5Rjv1iLjRr&k=fak1_Qu3jLRHpui6T3_k7cvhr3F1uHugu16fETsJrN8MKCPk)**: carries its Access key, so it opens without a prompt.
-- **[Restricted link](https://bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEE7YM_C2ak6J1pHLoyjTIE3qtXUMO1ew0XpS7jJLUS2zACh0ktqF1KJbtNERiaZhknsGD-MwBAqT3UlyaMCYx3PgVMLGj6m6OtUqLU3T00BlgwvXMm9WJ9vCMblw_uiYFdAQgwrxkVxsbRJOT9I6g9UXHCfDZJQ11Il6Jz-u4p4oqR)**: asks for its Access key, `fak1_txekkuXRme36QrbqRN_uvG91DBa8OhpCJShw8MsJcEg`.
+- **[Open link](https://bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEEpYpt3hrdlaAnCiP4YiwKDXozDXfeemRczk0aEHp0rJVwu-5t6TszxNiCbk0qPTBAB0_fYIzUBWG6M3DYE7nkXAVMkxAhCxk_8kqJrukEBlgwSIRvPBRWpfeNsXJfJBjZ9GRZanVKk1AbL3wHJcGZKsJV0uY75TFJMK5Rjv1iLjRr&k=fak1_Qu3jLRHpui6T3_k7cvhr3F1uHugu16fETsJrN8MKCPk)**: carries its Access key, so it opens without a prompt.
+- **[Restricted link](https://bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64.ipfs.inbrowser.link/#v1/bafybeifd567whjwnh5aoxucilqtra7mmzqfbjdxt35ytxwbt5kqqbmx7re&d=pwABAXgocGllY2U6MHgyNzM3MGMzZjgzNTRmYzZmZjJkMzFkNjIzMWZhZjJmMwJUsmE-AvIy0AvPBgwscKm2DQkwlZoDUIeaTjPUnDLnBrmADSbMFhUEWEEE7YM_C2ak6J1pHLoyjTIE3qtXUMO1ew0XpS7jJLUS2zACh0ktqF1KJbtNERiaZhknsGD-MwBAqT3UlyaMCYx3PgVMLGj6m6OtUqLU3T00BlgwvXMm9WJ9vCMblw_uiYFdAQgwrxkVxsbRJOT9I6g9UXHCfDZJQ11Il6Jz-u4p4oqR)**: asks for its Access key, `fak1_txekkuXRme36QrbqRN_uvG91DBa8OhpCJShw8MsJcEg`.
 
 > [!WARNING]
 > This Access key is public only because it's a demo. For a real share, send the Access key on a separate channel from the link, never next to it.
@@ -79,7 +79,7 @@ The viewer accepts `d` then `k` in that order, `d` up to 8192 characters, and no
 
 ### Opening a link
 
-With `k`, the viewer clears it from the address bar (keeping `d`) before it fetches anything, so a reload or a copy of the address no longer carries the key, then opens the share with no prompt. If the key doesn't work it falls back to the prompt with a notice. Without `k`, it asks for the Access key and checks the pasted text first: whitespace is dropped, and a group key Grant (`fgr1_…`), a Share link, text without `fak1_` or a key of the wrong length is refused with its own message before anything else happens.
+With `k`, the viewer clears it from the address bar (keeping `d`) before it fetches anything, so a reload or a copy of the address no longer carries the key, then opens the share with no prompt. The history entry records only that a key was removed, so a reload asks for the Access key with a notice saying why. If the key doesn't work it falls back to the prompt with a notice. Another link opened in the same tab (pasted, or by Back and Forward) closes the open share first, zeroing its keys, and its unfinished work never reaches the page. Without `k`, it asks for the Access key and checks the pasted text first: whitespace is dropped, and a group key Grant (`fgr1_…`), a Share link, text without `fak1_` or a key of the wrong length is refused with its own message before anything else happens.
 
 1. **Open the payload, before any request.** A Delivery goes through keysmith's `openDelivery` (chain signatures, expiry, T as the bearer, the key commitment, the grant naming the claim). A plain grant is unwrapped with `unwrapWith`. The grant must name one piece (`piece:<salt>`); a keyspace or scope grant is refused. A wrong Access key fails here, with nothing fetched.
 2. **Read the envelope header** with Range requests: a chunked FEE envelope of a CAR.
@@ -201,7 +201,7 @@ The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-f
 
 | Release | Viewer CID | Network |
 |---|---|---|
-| `9b141cb` | `bafkreignymhjvidv5bx5tvggzvob775a7avje43er4tvzyyww7af5vcksy` | mainnet |
+| `0a0b8b5` | `bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64` | mainnet |
 
 The `9b141cb` row predates releases, so it names a commit. To point the stable URL back at a recorded build, run the **Rollback** workflow with its CID.
 
