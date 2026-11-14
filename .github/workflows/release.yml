@@ -182,6 +182,9 @@ jobs:
           fi
 
   # Only the Cloudflare token, in the `release` environment, which holds the approval. Runs only scripts/release.ts.
+  # Our own DNSLink switch, not webmaster's `dnslink-name`, which runs in the upload step (both secrets in one
+  # job) and switches before cid.contact lists the CID. Move to webmaster once it can switch the DNSLink without
+  # uploading and wait for cid.contact first; rollback.yml can then use the same mode.
   dnslink:
     needs: [release-please, deploy-check, upload]
     runs-on: ubuntu-latest

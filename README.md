@@ -193,7 +193,7 @@ pnpm build
 node scripts/release.ts cid   # the CID of dist/ as a folder holding index.html
 ```
 
-Releases are published as a folder holding `index.html`, with [filoz-webmaster](https://github.com/FilOzone/filoz-webmaster), so their CIDs start with `bafybei`. The older `bafkrei` rows are the file on its own. Both open the same way, at `https://<cid>.ipfs.inbrowser.link/`.
+Releases are published as a folder holding `index.html`, with [filoz-webmaster](https://github.com/FilOzone/filoz-webmaster), so their CIDs start with `bafybei`.
 
 The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-filecoin-cloud.ipns.inbrowser.link/`, which serves the build named by the [DNSLink](https://dnslink.dev) record `_dnslink.viewer.filecoin.cloud`. Releases are made by CI:
 
