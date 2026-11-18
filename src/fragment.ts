@@ -1,6 +1,8 @@
-// #v1/<encryptedRootCid>&d=<payload>[&k=<access key>], exactly as filecoin-pin's formatShareLink writes it
-// ponytail: `d` then `k`, in that order only; parse the parameters as a set if another writer ever orders them differently
-const FRAGMENT_PATTERN = /^v1\/(b[a-z2-7]{20,120})&d=([A-Za-z0-9_-]{1,8192})(?:&k=(fak1_[A-Za-z0-9_-]{43}))?$/
+// #v1/<encryptedRootCid>&d=<payload>[&s=<providers>][&k=<access key>], exactly as filecoin-pin's formatShareLink writes
+// it. `s` (a private upload's link only) lists the providers that hold the piece: comma-separated, URI-encoded URLs.
+// ponytail: `d`, `s`, `k`, in that order only; parse the parameters as a set if another writer ever orders them differently
+const FRAGMENT_PATTERN =
+  /^v1\/(b[a-z2-7]{20,120})&d=([A-Za-z0-9_-]{1,8192})(?:&s=([A-Za-z0-9%._~-]{1,4096}(?:,[A-Za-z0-9%._~-]{1,4096}){0,7}))?(?:&k=(fak1_[A-Za-z0-9_-]{43}))?$/
 const ACCESS_KEY_PREFIX = 'fak1_'
 const KEY_BYTES = 32
 
@@ -10,6 +12,19 @@ export interface FragmentParams {
   payload: Uint8Array<ArrayBuffer>
   /** The Access key, when the link carries it: the 32-byte secp256k1 private key the payload is wrapped to. */
   key?: Uint8Array<ArrayBuffer>
+  /** A private upload's providers (`s`): the http(s) service URLs its piece is fetched from. */
+  providers?: string[]
+}
+
+/** A provider from `s`: an http(s) URL with no credentials, without a trailing slash; null otherwise. */
+function providerUrl(text: string): string | null {
+  try {
+    const url = new URL(decodeURIComponent(text))
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) return null
+    return url.toString().replace(/\/+$/, '')
+  } catch {
+    return null
+  }
 }
 
 const encodeBase64Url = (bytes: Uint8Array): string =>
@@ -45,10 +60,13 @@ export function parseFragment(hash: string): FragmentParams | null {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash
   const match = FRAGMENT_PATTERN.exec(raw)
   if (!match) return null
-  const [, cid, data, accessKey] = match
+  const [, cid, data, servers, accessKey] = match
   const payload = decodeBase64Url(data)
   if (!payload) return null
-  if (accessKey === undefined) return { cid, payload }
+  const providers = servers?.split(',').map(providerUrl)
+  if (providers?.some((provider) => provider === null)) return null
+  const share = { cid, payload, ...(providers && { providers: providers as string[] }) }
+  if (accessKey === undefined) return share
   const key = decodeAccessKey(accessKey)
-  return key ? { cid, payload, key } : null
+  return key ? { ...share, key } : null
 }

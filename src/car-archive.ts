@@ -1,5 +1,7 @@
 import {
+  type ClaimChain,
   type Grant,
+  authorizationHeader,
   decodeDelivery,
   decodeGrant,
   keyForEnvelope,
@@ -11,7 +13,8 @@ import {
 import { decode as decodeCbor } from '@ipld/dag-cbor'
 import * as fee from 'filecoin-encryption-envelope'
 import { CID } from 'multiformats/cid'
-import { bytesToHex } from 'viem'
+import { type Hex, bytesToHex, getAddress } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 import {
   DamagedLinkError,
   NotAShareError,
@@ -24,6 +27,7 @@ import {
   TooManyEntriesError,
   WrongAccessKeyError,
 } from './errors.js'
+import { openPrivateSource } from './private-source.js'
 import { openRangeSource } from './range-source.js'
 import {
   CAR_CONTENT_TYPE,
@@ -85,12 +89,25 @@ export async function openProtectedArchive(
   cid: string,
   payload: Uint8Array,
   accessKey: Uint8Array,
-  fetchFn: typeof fetch = fetch
+  fetchFn: typeof fetch = fetch,
+  providers: readonly string[] = []
 ): Promise<ProtectedArchive> {
-  let opened: { key: Uint8Array; grant: Grant }
+  let opened: { key: Uint8Array; grant: Grant; chain?: ClaimChain }
+  // A private upload (its link's final claim names its piece): where to fetch it, and the signed request to present
+  let gated: { pieceCid: CID; token: string } | undefined
   try {
     if (!CID_PATTERN.test(cid)) throw new Error('Invalid encrypted Root CID')
     opened = await openPayload(payload, accessKey)
+    const locator = opened.chain?.links.at(-1)?.pieceCid
+    if (opened.chain && locator) {
+      if (providers.length === 0) throw new DamagedLinkError('The link names a private upload but no provider for it')
+      const pieceCid = CID.decode(locator)
+      // Signed now, while T is in hand: one request, good for 4 minutes, presented to each provider in turn
+      const header = await authorizationHeader(privateKeyToAccount(bytesToHex(accessKey)), opened.chain, {
+        pieceCid: pieceCid.bytes,
+      })
+      gated = { pieceCid, token: header.slice('FOC-Grant '.length) }
+    }
   } finally {
     accessKey.fill(0)
   }
@@ -99,8 +116,10 @@ export async function openProtectedArchive(
   let key: Uint8Array | undefined
   try {
     // inbrowser.link's service worker answers this from storage providers; if it doesn't, the request goes to the
-    // gateway that already serves the Viewer, not a third party
-    const source = await openRangeSource(`https://${cid}.ipfs.inbrowser.link/`, fetchFn)
+    // gateway that already serves the Viewer, not a third party. A private upload comes from its own providers.
+    const source = gated
+      ? await openPrivateSource(CID.parse(cid), gated.pieceCid, providers, gated.token, fetchFn)
+      : await openRangeSource(`https://${cid}.ipfs.inbrowser.link/`, fetchFn)
     const info = await fee.parse(source)
     if (info.scheme !== 'chunked' || info.contentType !== CAR_CONTENT_TYPE || !info.params.plaintextLength) {
       throw new NotAShareError()
@@ -124,8 +143,14 @@ export async function openProtectedArchive(
 const DELIVERY = 4
 const GRANT = 5
 
-/** The piece's node key and the grant naming it. Every failure here happens before any request. */
-async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<{ key: Uint8Array; grant: Grant }> {
+/**
+ * The piece's node key and the grant naming it, and for a Delivery its claim chain. Every failure here happens before
+ * any request.
+ */
+async function openPayload(
+  payload: Uint8Array,
+  accessKey: Uint8Array
+): Promise<{ key: Uint8Array; grant: Grant; chain?: ClaimChain }> {
   // ponytail: T's hex string can't be zeroed; only its bytes are
   const T = bytesToHex(accessKey)
   try {
@@ -157,6 +182,12 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
   try {
     opened = await openDelivery(T, payload)
   } catch (cause) {
+    // A chain that narrows a group to a piece (a session key's share of a private upload) can only be verified with
+    // the piece's labels, which are inside the piece the chain is needed to fetch. The viewer doesn't need to verify
+    // it: the provider's gate does, against the real labels, and the key is checked by keyForEnvelope and FEE.
+    if (cause instanceof Error && cause.message.includes("checking it needs the piece's labels")) {
+      return openUnverified(T, payload)
+    }
     throw deliveryError(cause)
   }
   // keysmith opens an expired chain and says so (its expiry limits fetching from a gating provider, not the key);
@@ -165,7 +196,25 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
     opened.key.fill(0)
     throw new ShareExpiredError('The share has expired')
   }
-  return { key: opened.key, grant: opened.grant }
+  return { key: opened.key, grant: opened.grant, chain: opened.chain }
+}
+
+/** A Delivery opened without verifying its chain (see openPayload): T must be its bearer, and it must not have expired. */
+async function openUnverified(
+  T: Hex,
+  payload: Uint8Array
+): Promise<{ key: Uint8Array; grant: Grant; chain: ClaimChain }> {
+  const { chain, grant } = decodeDelivery(payload)
+  const bearer = chain.links.at(-1)?.bearer
+  if (!bearer || getAddress(bearer) !== privateKeyToAccount(T).address) {
+    throw new WrongAccessKeyError('The Access key is not the Delivery bearer')
+  }
+  if (chain.expires <= Math.floor(Date.now() / 1000)) throw new ShareExpiredError('The share has expired')
+  try {
+    return { key: await unwrapWith(T, grant), grant, chain }
+  } catch (cause) {
+    throw new WrongAccessKeyError('The Access key does not open this Delivery', { cause })
+  }
 }
 
 // openDelivery throws plain Errors; these messages are keysmith's (claims.ts verifyChain and openDelivery).

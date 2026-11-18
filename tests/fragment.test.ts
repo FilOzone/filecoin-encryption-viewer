@@ -91,6 +91,22 @@ describe('parseFragment', () => {
   })
 })
 
+describe("a private upload's providers (s)", () => {
+  const S = ['https://sp1.example/pdp', 'http://localhost:5711'].map(encodeURIComponent).join(',')
+
+  it('parses s between d and k, as filecoin-pin writes it', () => {
+    const parsed = parseFragment(`#v1/${CID}&d=${D}&s=${S}&k=${KEY}`)
+    expect(parsed?.providers).toEqual(['https://sp1.example/pdp', 'http://localhost:5711'])
+    expectSameBytes(parsed?.key as Uint8Array, KEY_BYTES)
+  })
+
+  it('refuses a provider that is not an http(s) URL, or one with credentials', () => {
+    for (const bad of ['javascript:alert(1)', 'https://user:pass@sp.example', 'ftp://sp.example']) {
+      expect(parseFragment(`#v1/${CID}&d=${D}&s=${encodeURIComponent(bad)}`)).toBeNull()
+    }
+  })
+})
+
 describe('access key encoding', () => {
   it('matches a known answer', () => {
     expect(encodeAccessKey(KEY_BYTES)).toBe(KEY)

@@ -99,6 +99,12 @@ No message names anything from inside the envelope.
 
 The viewer fetches `https://<encrypted-root-cid>.ipfs.inbrowser.link/` with HTTP Range requests. inbrowser.link's service worker intercepts that request (the host is never reached directly) and serves it from the storage providers through IPNI, so the viewer only works when opened at an inbrowser.link origin. A share opened before IPNI has caught up shows "not available yet".
 
+### Private uploads
+
+A private upload (`filecoin-pin add --private`) is not served on open paths, so the gateway can't fetch it. Its link carries a Delivery whose final claim names the piece (its CID as the claim's locator) and is borne by T, and `&s=` lists the providers that hold it (comma-separated, URI-encoded http(s) URLs). The viewer signs one read request with T and fetches `<provider>/download/<piece-cid>?foc_grant=<token>` from each provider in turn: the query form, not an `Authorization` header, so the request needs no CORS preflight. Providers don't expose `Content-Range` to scripts, so the piece is fetched whole (up to the in-memory cap), every block is checked against its CID, and `encrypted.fee` is reassembled from the link's root CID. This is why `connect-src` allows `https:`.
+
+A session key's link delegates the piece from its group Grant, and keysmith can verify such a chain only with the piece's labels, which are inside the piece. The viewer doesn't verify it: the provider's gate does, against the real labels, and the key is checked by `keyForEnvelope` and FEE. It still checks that T is the bearer and that the chain hasn't expired. An owner's link (one root claim) is verified as before.
+
 ## Encryption format
 
 The format is defined by filecoin-pin `add --encrypt`:

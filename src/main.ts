@@ -193,7 +193,9 @@ const devLog = (message: string) => console.log(`[foc-viewer dev] ${message}`)
 function devFetch(): typeof fetch {
   const ignoreRange = new URLSearchParams(window.location.search).get('ignore-range')
   const url = `/__dev-share${ignoreRange === null ? '' : `?${new URLSearchParams({ 'ignore-range': ignoreRange })}`}`
-  return async (_input, init) => {
+  return async (input, init) => {
+    // A private share's providers (a local foc-devnet) are fetched as they are; only the gateway is the harness
+    if (!String(input).includes('.ipfs.inbrowser.link')) return fetch(input, init)
     const startedAt = performance.now()
     const response = await fetch(url, init)
     const range = new Headers(init?.headers).get('range')?.match(/^bytes=(\d+)-(\d+)$/)
@@ -203,23 +205,37 @@ function devFetch(): typeof fetch {
   }
 }
 
-async function unlockArchive(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
+async function unlockArchive(
+  cid: string,
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  providers: readonly string[] = []
+): Promise<void> {
   const since = generation
   try {
-    await unlock(cid, payload, accessKey)
+    await unlock(cid, payload, accessKey, providers)
   } catch (error) {
     if (!(error instanceof RangeUnsupportedError)) throw error
     showRangeIgnored(error.response, since)
   }
 }
 
-async function unlock(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
+async function unlock(
+  cid: string,
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  providers: readonly string[] = []
+): Promise<void> {
   const startedAt = performance.now()
   const since = generation
   const { signal } = shareRequests
   const fetchFn = import.meta.env.DEV ? devFetch() : fetch
-  const archive = await openProtectedArchive(cid, payload, accessKey, (input, init) =>
-    fetchFn(input, { ...init, signal })
+  const archive = await openProtectedArchive(
+    cid,
+    payload,
+    accessKey,
+    (input, init) => fetchFn(input, { ...init, signal }),
+    providers
   )
   if (import.meta.env.DEV)
     devLog(`archive ready (payload + head + metadata + decrypt + listing): ${elapsed(startedAt)}`)
@@ -255,22 +271,27 @@ function forgetLinkKey(): void {
 
 // The link carries its Access key: open with a copy of it (openProtectedArchive zeroes what it gets). A wrong key falls
 // back to the prompt; a share that isn't available yet can be retried with the same key; anything else is final.
-async function unlockWithKey(cid: string, payload: Uint8Array, accessKey: Uint8Array): Promise<void> {
+async function unlockWithKey(
+  cid: string,
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  providers: readonly string[] = []
+): Promise<void> {
   const since = generation
   linkKey = accessKey
   showDecrypting(container)
   try {
-    await unlockArchive(cid, payload, accessKey.slice())
+    await unlockArchive(cid, payload, accessKey.slice(), providers)
   } catch (error) {
     // Replaced meanwhile: closing the share already zeroed this key, and linkKey may now be the next link's
     if (isStale(since)) return
     if (error instanceof NotAvailableError) {
-      showLinkError(container, unlockErrorMessage(error), () => void unlockWithKey(cid, payload, accessKey))
+      showLinkError(container, unlockErrorMessage(error), () => void unlockWithKey(cid, payload, accessKey, providers))
       return
     }
     forgetLinkKey()
     if (error instanceof WrongAccessKeyError) {
-      showAccessKeyPrompt(container, (key) => unlockArchive(cid, payload, key), KEY_FAILED_MESSAGE)
+      showAccessKeyPrompt(container, (key) => unlockArchive(cid, payload, key, providers), KEY_FAILED_MESSAGE)
     } else {
       showLinkError(container, unlockErrorMessage(error))
     }
@@ -321,18 +342,18 @@ function openShare(): void {
     return
   }
 
-  const { cid, payload, key } = fragment
+  const { cid, payload, key, providers = [] } = fragment
   if (key) {
     // Before any request: a reload or a copy of the address no longer carries the key. The entry only records that it
     // had one, so a reload can say why the prompt is back.
     history.replaceState({ keyRemoved: true }, '', address)
-    void unlockWithKey(cid, payload, key)
+    void unlockWithKey(cid, payload, key, providers)
     return
   }
   const keyRemoved = (history.state as { keyRemoved?: unknown } | null)?.keyRemoved === true
   showAccessKeyPrompt(
     container,
-    (accessKey) => unlockArchive(cid, payload, accessKey),
+    (accessKey) => unlockArchive(cid, payload, accessKey, providers),
     keyRemoved ? KEY_REMOVED_MESSAGE : undefined
   )
 }

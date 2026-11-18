@@ -3,10 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <!-- connect-src https://*.ipfs.inbrowser.link: the share's Range requests, which the gateway's service worker answers;
-         'self': Firefox checks the gateway's service-worker script against connect-src -->
+         'self': Firefox checks the gateway's service-worker script against connect-src;
+         https:: a private upload's link names the providers it is fetched from (/download/<piece>, authorized by the
+         link), and they can be any https origin. The page still fetches only what the link names. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src blob: data:; font-src data:; connect-src 'self' https://*.ipfs.inbrowser.link; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src blob: data:; font-src data:; connect-src 'self' https://*.ipfs.inbrowser.link https:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Encrypted share · Filecoin</title>

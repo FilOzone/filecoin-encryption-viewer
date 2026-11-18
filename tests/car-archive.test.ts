@@ -1,4 +1,4 @@
-import { decodeDelivery } from '@filoz/keysmith'
+import { decodeDelivery, verifyPresentation } from '@filoz/keysmith'
 import { encode as encodeCbor } from '@ipld/dag-cbor'
 import * as fee from 'filecoin-encryption-envelope'
 import { CID } from 'multiformats/cid'
@@ -30,7 +30,9 @@ import {
   groupGrant,
   groupKeyGrant,
   makeShare,
+  outerCar,
   plainGrant,
+  privateDelivery,
 } from './fixtures/make-share.js'
 import type { ShareFile } from './fixtures/make-share.js'
 import { serveRange } from './fixtures/serve-range.js'
@@ -654,5 +656,87 @@ describe('archive lifetime', () => {
     await expect(
       openProtectedArchive('nope', PAYLOAD, accessKey(), serveRange(new Uint8Array(1)).fetch)
     ).rejects.toThrow('Invalid')
+  })
+})
+
+describe('private shares (a Delivery whose claim names the piece, fetched from its providers)', () => {
+  const PROVIDER = 'https://sp1.example/pdp'
+  const PIECE = CID.parse('bafkzcibcgmcfzo4vnay2rysh5udpp4ut7lprug3enpwikqvmnjgnekjjcnrwsjy')
+
+  // The provider's gate: serves the piece to a request that names it, and checks what it was given
+  async function gated(group?: string) {
+    const envelope = await makeShare(folder, group ? { group } : {})
+    const { root, car } = await outerCar(envelope)
+    const seen: string[] = []
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      seen.push(`${url.origin}${url.pathname}`)
+      if (url.pathname !== `/pdp/download/${PIECE}` || !url.searchParams.get('foc_grant')) {
+        return new Response('not found', { status: 404 })
+      }
+      return new Response(car as BlobPart, { status: 200, headers: { 'content-length': String(car.length) } })
+    })
+    return { root, fetchFn, seen }
+  }
+
+  it.each([
+    ['the owner, as one root claim', false],
+    ['a session key, delegated from its group Grant', true],
+  ])('opens one from %s, fetched whole from /download/<piece> with a signed foc_grant', async (_case, delegated) => {
+    const { root, fetchFn, seen } = await gated('team/docs')
+    const payload = await privateDelivery(PIECE.bytes, { group: 'team/docs', delegated })
+
+    const archive = await openProtectedArchive(root.toString(), payload, accessKey(), fetchFn, [PROVIDER])
+
+    expect(archive.list()).toHaveLength(4)
+    expect(seen).toEqual([`https://sp1.example/pdp/download/${PIECE}`])
+    // The token is a presentation of the link's chain, signed by T for this piece
+    const token = new URL(String(fetchFn.mock.calls[0]?.[0])).searchParams.get('foc_grant') ?? ''
+    const presentation = Uint8Array.from(Buffer.from(token, 'base64url'))
+    const { chain } = decodeDelivery(payload)
+    expect(chain.links.length).toBe(delegated ? 2 : 1)
+    const piece = {
+      'foc/v': 2,
+      'foc/own': chain.owner.toLowerCase(),
+      'foc/gkid': chain.groupKeyId,
+      'foc/group': 'team/docs',
+      'foc/salt': `0x${'07'.repeat(16)}`,
+    }
+    await expect(
+      verifyPresentation(presentation, { pieceCid: PIECE.bytes, piece: piece as never, chainId: 314159n })
+    ).resolves.toBeDefined()
+  })
+
+  it('tries the next provider when one does not serve it', async () => {
+    const { root, fetchFn, seen } = await gated()
+    const payload = await privateDelivery(PIECE.bytes)
+    await openProtectedArchive(root.toString(), payload, accessKey(), fetchFn, ['https://down.example', PROVIDER])
+    expect(seen).toEqual([`https://down.example/download/${PIECE}`, `https://sp1.example/pdp/download/${PIECE}`])
+  })
+
+  it("refuses a piece whose blocks are not the link's root", async () => {
+    const { fetchFn } = await gated()
+    const payload = await privateDelivery(PIECE.bytes)
+    await expect(openProtectedArchive(CID_STRING, payload, accessKey(), fetchFn, [PROVIDER])).rejects.toBeInstanceOf(
+      NotAShareError
+    )
+  })
+
+  it('refuses a private share that names no provider, before any fetch', async () => {
+    const fetchFn = vi.fn()
+    const payload = await privateDelivery(PIECE.bytes)
+    await expect(openProtectedArchive(CID_STRING, payload, accessKey(), fetchFn, [])).rejects.toBeInstanceOf(
+      DamagedLinkError
+    )
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses an expired private share before any fetch', async () => {
+    const fetchFn = vi.fn()
+    const payload = await privateDelivery(PIECE.bytes, { expires: Math.floor(Date.now() / 1000) - 60 })
+    await expect(openProtectedArchive(CID_STRING, payload, accessKey(), fetchFn, [PROVIDER])).rejects.toBeInstanceOf(
+      ShareExpiredError
+    )
+    expect(fetchFn).not.toHaveBeenCalled()
   })
 })
