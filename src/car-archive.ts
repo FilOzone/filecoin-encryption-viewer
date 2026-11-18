@@ -5,6 +5,7 @@ import {
   keyForEnvelope,
   openDelivery,
   publicKeyOf,
+  readPieceMetadata,
   unwrapWith,
 } from '@filoz/keysmith'
 import { decode as decodeCbor } from '@ipld/dag-cbor'
@@ -142,7 +143,7 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
   } catch (cause) {
     throw new DamagedLinkError('The link payload is not a keysmith grant or Delivery', { cause })
   }
-  // A keyspace or scope grant opens more than one upload: a Share link never carries one
+  // A grant for a whole group key or a group opens more than one upload: a Share link never carries one
   if (!grant.node.startsWith('piece:')) throw new NotAShareError()
 
   if (kind === GRANT) {
@@ -152,15 +153,22 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
       throw new WrongAccessKeyError('The Access key does not open this grant', { cause })
     }
   }
+  let opened: Awaited<ReturnType<typeof openDelivery>>
   try {
-    const { key, grant: named } = await openDelivery(T, payload)
-    return { key, grant: named }
+    opened = await openDelivery(T, payload)
   } catch (cause) {
     throw deliveryError(cause)
   }
+  // keysmith opens an expired chain and says so (its expiry limits fetching from a gating provider, not the key);
+  // a share's expiry is what its sender set, so the viewer still refuses it
+  if (opened.expired) {
+    opened.key.fill(0)
+    throw new ShareExpiredError('The share has expired')
+  }
+  return { key: opened.key, grant: opened.grant }
 }
 
-// openDelivery throws plain Errors; these messages are keysmith 0.1.0's (claims.ts verifyChain and openDelivery).
+// openDelivery throws plain Errors; these messages are keysmith's (claims.ts verifyChain and openDelivery).
 // Anything else is a damaged link: a bad signature, or a grant that doesn't unwrap or match its commitment even though
 // the chain names this key as its bearer.
 function deliveryError(cause: unknown): Error {
@@ -172,10 +180,17 @@ function deliveryError(cause: unknown): Error {
   return new DamagedLinkError('The Delivery does not verify', { cause })
 }
 
-/** keyForEnvelope checks the envelope's owner, keyspace and salt against the grant. */
+/**
+ * keyForEnvelope checks the envelope's owner, group key and salt against the grant. Only keysmith format 2 labels are
+ * a share: anything else, including a keysmith 0.1.0 (format 1) upload, is not one this viewer opens.
+ */
 function pieceKeyFor(nodeKey: Uint8Array, appMetadata: fee.AppMetadata | undefined, grant: Grant): Uint8Array {
   const metadata = (appMetadata ?? {}) as Record<string, unknown>
-  if (metadata['foc/v'] !== 1 || typeof metadata['foc/ks'] !== 'string') throw new NotAShareError()
+  try {
+    readPieceMetadata(metadata)
+  } catch (cause) {
+    throw new NotAShareError({ cause })
+  }
   try {
     return keyForEnvelope(nodeKey, metadata, grant)
   } catch (cause) {

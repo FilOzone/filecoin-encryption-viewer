@@ -27,7 +27,8 @@ import {
   accessKey,
   delivery,
   encryptCar,
-  keyspaceGrant,
+  groupGrant,
+  groupKeyGrant,
   makeShare,
   plainGrant,
 } from './fixtures/make-share.js'
@@ -291,6 +292,13 @@ describe('link payload', () => {
     expectSameBytes(key, new Uint8Array(32))
   })
 
+  it('opens a share of an upload written under a group (add --group): the link holds only that piece', async () => {
+    const stub = serveRange(await makeShare(folder, { group: 'team/design' }))
+    const payload = await plainGrant({ group: 'team/design' })
+    const archive = await openProtectedArchive(CID_STRING, payload, accessKey(), stub.fetch)
+    expect(archive.list()).toHaveLength(4)
+  })
+
   it.each([
     ['a plain grant', plainGrant],
     ['a Delivery', delivery],
@@ -327,8 +335,11 @@ describe('link payload', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 
-  it('refuses a keyspace grant, which is not a Share link, before any fetch', async () => {
-    const { result, fetchFn } = await openWith(await keyspaceGrant())
+  it.each([
+    ['the whole group key', groupKeyGrant],
+    ['a group', groupGrant],
+  ])('refuses a grant for %s, which is not a Share link, before any fetch', async (_case, make) => {
+    const { result, fetchFn } = await openWith(await make())
     expect(result).toBeInstanceOf(NotAShareError)
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -408,8 +419,8 @@ describe('what is accepted', () => {
     await expect(open(share)).rejects.toBeInstanceOf(NotAShareError)
   })
 
-  it('rejects labels that name another keysmith format version', async () => {
-    const share = await makeShare(folder, { appMetadata: { 'foc/v': 2, 'foc/ks': `0x${'22'.repeat(16)}` } })
+  it('rejects keysmith 0.1.0 (format 1) labels', async () => {
+    const share = await makeShare(folder, { appMetadata: { 'foc/v': 1, 'foc/ks': `0x${'22'.repeat(16)}` } })
     await expect(open(share)).rejects.toBeInstanceOf(NotAShareError)
   })
 
