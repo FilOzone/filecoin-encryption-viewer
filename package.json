@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@filoz/keysmith": "0.1.0",
+    "@filoz/keysmith": "file:vendor/filoz-keysmith-0.2.0-061b1110.tgz",
     "@ipld/dag-cbor": "10.0.1",
     "@ipld/dag-pb": "4.1.7",
     "client-zip": "2.5.1",
