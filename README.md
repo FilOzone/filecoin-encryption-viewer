@@ -111,10 +111,10 @@ outer CAR (public, IPNI)  ── UnixFS file, root = Encrypted root CID
 ```
 
 - The envelope's `content_type` is `application/vnd.ipld.car`. The inner CAR lists every directory and file node before any file data, so the viewer knows the whole tree, and every file's byte ranges, from the first few hundred KB.
-- The envelope's authenticated `appMetadata` holds keysmith's piece labels (`pieceMetadata`, keysmith format 2): `foc/v` (2), `foc/own`, `foc/gkid`, optionally `foc/group`, and `foc/salt`. The piece key is derived from the group key (through the group, if any) and the salt, so every upload has its own key, and a Share link opens only its own upload, whatever group it is in. Uploads and links from keysmith 0.1.0 (format 1) are not opened.
+- The envelope's authenticated `appMetadata` holds keysmith's piece labels (`pieceMetadata`, keysmith format 2): `foc/v` (2), `foc/own`, `foc/gkid`, optionally `foc/group`, and `foc/salt`. The piece key is derived from the group key (through the group, if any) and the salt, so every upload has its own key, and a Share link opens only its own upload, whatever group it is in. Links from filecoin-pin 2.3 and 2.4 (keysmith 0.1.0, format 1: `foc/v` 1, `foc/ks`) still open: the payload names its format before anything is fetched, and that format's keysmith reads it. A link of one format never opens an upload of the other.
 - File and folder names exist only inside the ciphertext. The on-chain piece name is `encrypted.fee`.
 
-Key handling is [`@filoz/keysmith`](https://www.npmjs.com/package/@filoz/keysmith) 0.1.0 (with `viem`).
+Key handling is [`@filoz/keysmith`](https://www.npmjs.com/package/@filoz/keysmith) (with `viem`), plus keysmith 0.1.0 under the `keysmith-v1` alias for format 1 links.
 
 ## Content rendering
 

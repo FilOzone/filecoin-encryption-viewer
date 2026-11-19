@@ -10,8 +10,9 @@ import {
 } from '@filoz/keysmith'
 import { decode as decodeCbor } from '@ipld/dag-cbor'
 import * as fee from 'filecoin-encryption-envelope'
+import * as KeysmithV1 from 'keysmith-v1'
 import { CID } from 'multiformats/cid'
-import { bytesToHex } from 'viem'
+import { type Hex, bytesToHex } from 'viem'
 import {
   DamagedLinkError,
   NotAShareError,
@@ -88,9 +89,10 @@ export async function openProtectedArchive(
   fetchFn: typeof fetch = fetch
 ): Promise<ProtectedArchive> {
   let opened: { key: Uint8Array; grant: Grant }
+  const format = formatOf(payload)
   try {
     if (!CID_PATTERN.test(cid)) throw new Error('Invalid encrypted Root CID')
-    opened = await openPayload(payload, accessKey)
+    opened = await openPayload(payload, accessKey, format)
   } finally {
     accessKey.fill(0)
   }
@@ -105,7 +107,7 @@ export async function openProtectedArchive(
     if (info.scheme !== 'chunked' || info.contentType !== CAR_CONTENT_TYPE || !info.params.plaintextLength) {
       throw new NotAShareError()
     }
-    key = pieceKeyFor(nodeKey, info.appMetadata, opened.grant)
+    key = pieceKeyFor(nodeKey, info.appMetadata, opened.grant, format)
     nodeKey.fill(0)
     nodeKey = undefined
     // From here the archive owns the key; close() zeroes it
@@ -124,8 +126,66 @@ export async function openProtectedArchive(
 const DELIVERY = 4
 const GRANT = 5
 
+/**
+ * What the viewer needs from one keysmith format. Format 2 is current keysmith; format 1 is keysmith 0.1.0, which
+ * filecoin-pin 2.3 and 2.4 use, so links they make keep opening. The two differ in how an expired Delivery is reported
+ * (0.1.0 throws "The chain expired at"; 0.2.0 opens it and says `expired`) and in the envelope labels each reads.
+ * ponytail: drop format 1 (this adapter, the keysmith-v1 alias and its tests) once 0.1.0 links have aged out.
+ */
+interface KeysmithFormat {
+  decodeGrant(payload: Uint8Array): Grant
+  decodeDelivery(payload: Uint8Array): { grant: Grant }
+  unwrapWith(T: Hex, grant: Grant): Promise<Uint8Array>
+  openDelivery(T: Hex, payload: Uint8Array): Promise<{ key: Uint8Array; grant: Grant; expired: boolean }>
+  /** Whether the envelope's labels are this format's: a link only opens an upload of its own format. */
+  isLabels(metadata: Record<string, unknown>): boolean
+  keyForEnvelope(nodeKey: Uint8Array, metadata: Record<string, unknown>, grant: Grant): Uint8Array
+}
+
+const FORMAT_2: KeysmithFormat = {
+  decodeGrant,
+  decodeDelivery,
+  unwrapWith,
+  openDelivery,
+  isLabels(metadata) {
+    try {
+      readPieceMetadata(metadata)
+      return true
+    } catch {
+      return false
+    }
+  },
+  keyForEnvelope,
+}
+
+const FORMAT_1: KeysmithFormat = {
+  decodeGrant: (payload) => KeysmithV1.decodeGrant(payload) as never,
+  decodeDelivery: (payload) => KeysmithV1.decodeDelivery(payload) as never,
+  unwrapWith: (T, grant) => KeysmithV1.unwrapWith(T, grant as never),
+  // 0.1.0 refuses an expired chain itself, with the message deliveryError knows
+  openDelivery: async (T, payload) => ({ ...(await KeysmithV1.openDelivery(T, payload)), expired: false }) as never,
+  isLabels: (metadata) => metadata['foc/v'] === 1 && typeof metadata['foc/ks'] === 'string',
+  keyForEnvelope: (nodeKey, metadata, grant) => KeysmithV1.keyForEnvelope(nodeKey, metadata as never, grant as never),
+}
+
+/**
+ * The keysmith format a payload was made with, read before anything is fetched: a Delivery is `[v, chain, grant]`, a
+ * plain grant a map whose first key, 0, is `v`. Anything else is format 2, whose decoders say what is wrong with it.
+ */
+function formatOf(payload: Uint8Array): KeysmithFormat {
+  let version: number | undefined
+  if (payload[0] >> 5 === DELIVERY) version = payload[1]
+  else if (payload[0] >> 5 === GRANT && payload[1] === 0x00) version = payload[2]
+  if (version === 1) return FORMAT_1
+  return FORMAT_2
+}
+
 /** The piece's node key and the grant naming it. Every failure here happens before any request. */
-async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<{ key: Uint8Array; grant: Grant }> {
+async function openPayload(
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  format: KeysmithFormat
+): Promise<{ key: Uint8Array; grant: Grant }> {
   // ponytail: T's hex string can't be zeroed; only its bytes are
   const T = bytesToHex(accessKey)
   try {
@@ -137,8 +197,8 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
   const kind = payload[0] >> 5
   let grant: Grant
   try {
-    if (kind === DELIVERY) grant = decodeDelivery(payload).grant
-    else if (kind === GRANT) grant = decodeGrant(payload)
+    if (kind === DELIVERY) grant = format.decodeDelivery(payload).grant
+    else if (kind === GRANT) grant = format.decodeGrant(payload)
     else throw new Error('Neither a Delivery nor a grant')
   } catch (cause) {
     throw new DamagedLinkError('The link payload is not a keysmith grant or Delivery', { cause })
@@ -148,14 +208,14 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
 
   if (kind === GRANT) {
     try {
-      return { key: await unwrapWith(T, grant), grant }
+      return { key: await format.unwrapWith(T, grant), grant }
     } catch (cause) {
       throw new WrongAccessKeyError('The Access key does not open this grant', { cause })
     }
   }
-  let opened: Awaited<ReturnType<typeof openDelivery>>
+  let opened: Awaited<ReturnType<KeysmithFormat['openDelivery']>>
   try {
-    opened = await openDelivery(T, payload)
+    opened = await format.openDelivery(T, payload)
   } catch (cause) {
     throw deliveryError(cause)
   }
@@ -181,18 +241,19 @@ function deliveryError(cause: unknown): Error {
 }
 
 /**
- * keyForEnvelope checks the envelope's owner, group key and salt against the grant. Only keysmith format 2 labels are
- * a share: anything else, including a keysmith 0.1.0 (format 1) upload, is not one this viewer opens.
+ * keyForEnvelope checks the envelope's owner, group key and salt against the grant. Only labels of the link's own
+ * keysmith format are a share: a link of one format for an upload of the other is not.
  */
-function pieceKeyFor(nodeKey: Uint8Array, appMetadata: fee.AppMetadata | undefined, grant: Grant): Uint8Array {
+function pieceKeyFor(
+  nodeKey: Uint8Array,
+  appMetadata: fee.AppMetadata | undefined,
+  grant: Grant,
+  format: KeysmithFormat
+): Uint8Array {
   const metadata = (appMetadata ?? {}) as Record<string, unknown>
+  if (!format.isLabels(metadata)) throw new NotAShareError()
   try {
-    readPieceMetadata(metadata)
-  } catch (cause) {
-    throw new NotAShareError({ cause })
-  }
-  try {
-    return keyForEnvelope(nodeKey, metadata, grant)
+    return format.keyForEnvelope(nodeKey, metadata, grant)
   } catch (cause) {
     throw new OtherUploadError('The link is for another upload', { cause })
   }
