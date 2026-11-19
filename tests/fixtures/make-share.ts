@@ -52,8 +52,10 @@ export async function plainGrant(options: { salt?: Hex; T?: Hex; group?: string 
 }
 
 /** Owner mode's payload: a one-link claim chain from the owner to T's address, plus the wrapped key. */
-export async function delivery(options: { salt?: Hex; T?: Hex; expires?: number } = {}): Promise<Uint8Array> {
-  const metadata = shareMetadata(options.salt)
+export async function delivery(
+  options: { salt?: Hex; T?: Hex; expires?: number; group?: string } = {}
+): Promise<Uint8Array> {
+  const metadata = shareMetadata(options.salt, options.group)
   const T = options.T ?? ACCESS_KEY
   const { chain, nodeKey } = await rootClaim(OWNER, {
     owner: REF.owner,

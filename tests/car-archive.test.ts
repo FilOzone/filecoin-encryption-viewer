@@ -22,6 +22,7 @@ import { GatewayInactiveError, UnexpectedPageError } from '../src/errors.js'
 import { wholeBodyCap } from '../src/range-source.js'
 import { encodeVarint } from '../src/unixfs-car-layout.js'
 import { expectSameBytes } from './fixtures/bytes.js'
+import { deliveryV1, makeShareV1, plainGrantV1 } from './fixtures/make-share-v1.js'
 import {
   PAYLOAD,
   accessKey,
@@ -297,6 +298,13 @@ describe('link payload', () => {
   it('opens a share of an upload written under a group (add --group): the link holds only that piece', async () => {
     const stub = serveRange(await makeShare(folder, { group: 'team/design' }))
     const payload = await plainGrant({ group: 'team/design' })
+    const archive = await openProtectedArchive(CID_STRING, payload, accessKey(), stub.fetch)
+    expect(archive.list()).toHaveLength(4)
+  })
+
+  it('opens an owner-mode Delivery share of an upload written under a group', async () => {
+    const stub = serveRange(await makeShare(folder, { group: 'team/design' }))
+    const payload = await delivery({ group: 'team/design' })
     const archive = await openProtectedArchive(CID_STRING, payload, accessKey(), stub.fetch)
     expect(archive.list()).toHaveLength(4)
   })
@@ -738,5 +746,38 @@ describe('private shares (a Delivery whose claim names the piece, fetched from i
       ShareExpiredError
     )
     expect(fetchFn).not.toHaveBeenCalled()
+  })
+})
+
+describe('format 1 links (filecoin-pin 2.3, 2.4: keysmith 0.1.0)', () => {
+  async function openV1(payload: Uint8Array, share: Uint8Array) {
+    const stub = serveRange(share)
+    const fetchFn = vi.fn(stub.fetch)
+    const result = await openProtectedArchive(CID_STRING, payload, accessKey(), fetchFn).catch(
+      (cause: unknown) => cause
+    )
+    return { result, fetchFn }
+  }
+
+  it.each([
+    ['a plain grant', plainGrantV1],
+    ['a Delivery', () => deliveryV1()],
+  ])('still open with %s', async (_, make) => {
+    const { result } = await openV1(await make(), await makeShareV1(folder))
+    expect((result as ProtectedArchive).list()).toHaveLength(4)
+  })
+
+  it('refuses an expired format 1 Delivery before any fetch', async () => {
+    const { result, fetchFn } = await openV1(
+      await deliveryV1({ expires: Math.floor(Date.now() / 1000) - 3600 }),
+      await makeShareV1(folder)
+    )
+    expect(result).toBeInstanceOf(ShareExpiredError)
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('opens only an upload of its own format: a link of one format for the other is not a share', async () => {
+    expect((await openV1(await plainGrantV1(), await makeShare(folder))).result).toBeInstanceOf(NotAShareError)
+    expect((await openV1(await plainGrant(), await makeShareV1(folder))).result).toBeInstanceOf(NotAShareError)
   })
 })
