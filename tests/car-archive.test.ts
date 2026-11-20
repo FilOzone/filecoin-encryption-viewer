@@ -22,7 +22,7 @@ import { GatewayInactiveError, UnexpectedPageError } from '../src/errors.js'
 import { wholeBodyCap } from '../src/range-source.js'
 import { encodeVarint } from '../src/unixfs-car-layout.js'
 import { expectSameBytes } from './fixtures/bytes.js'
-import { deliveryV1, makeShareV1, plainGrantV1 } from './fixtures/make-share-v1.js'
+import { deliveryV1, keyspaceGrantV1, makeShareV1, plainGrantV1 } from './fixtures/make-share-v1.js'
 import {
   PAYLOAD,
   accessKey,
@@ -275,24 +275,62 @@ const flipped = (payload: Uint8Array, at: number) => {
 }
 
 // Opens with a fetch spy, so a test can assert that nothing was fetched
-async function openWith(payload: Uint8Array, key = accessKey()) {
-  const stub = serveRange(await makeShare(folder))
+async function openWith(payload: Uint8Array, key = accessKey(), share = makeShare) {
+  const stub = serveRange(await share(folder))
   const fetchFn = vi.fn(stub.fetch)
   const result = await openProtectedArchive(CID_STRING, payload, key, fetchFn).catch((cause: unknown) => cause)
   return { result, fetchFn }
 }
 
-describe('link payload', () => {
-  it.each([
+// What a link of either keysmith format must do. Format 1 (keysmith 0.1.0) is filecoin-pin 2.3 and 2.4's.
+// ponytail: drop the format 1 row with the viewer's format 1 adapter.
+const FORMATS = [
+  { format: 2, plainGrant, delivery, wholeKeyGrant: groupKeyGrant, makeShare },
+  { format: 1, plainGrant: plainGrantV1, delivery: deliveryV1, wholeKeyGrant: keyspaceGrantV1, makeShare: makeShareV1 },
+]
+
+describe.each(FORMATS)('a format $format link payload', ({ plainGrant, delivery, wholeKeyGrant, makeShare }) => {
+  const kinds = [
     ['a plain grant', plainGrant],
     ['a Delivery', delivery],
-  ])('opens with %s and zeroes the Access key', async (_, make) => {
+  ] as const
+
+  it.each(kinds)('opens with %s and zeroes the Access key', async (_, make) => {
     const key = accessKey()
-    const { result } = await openWith(await make(), key)
+    const { result } = await openWith(await make(), key, makeShare)
     expect((result as ProtectedArchive).list()).toHaveLength(4)
     expectSameBytes(key, new Uint8Array(32))
   })
 
+  it.each(kinds)('refuses a wrong Access key for %s before any fetch, and zeroes it', async (_, make) => {
+    const key = accessKey(OTHER_T)
+    const { result, fetchFn } = await openWith(await make(), key, makeShare)
+    expect(result).toBeInstanceOf(WrongAccessKeyError)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expectSameBytes(key, new Uint8Array(32))
+  })
+
+  it.each(kinds)("refuses %s for upload A against upload B's envelope as another upload", async (_, make) => {
+    const { result, fetchFn } = await openWith(await make({ salt: OTHER_SALT }), accessKey(), makeShare)
+    expect(result).toBeInstanceOf(OtherUploadError)
+    expect(fetchFn).toHaveBeenCalled()
+  })
+
+  it('refuses an expired Delivery before any fetch', async () => {
+    const expires = Math.floor(Date.now() / 1000) - 3600
+    const { result, fetchFn } = await openWith(await delivery({ expires }), accessKey(), makeShare)
+    expect(result).toBeInstanceOf(ShareExpiredError)
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses a grant for the whole key, which is not a Share link, before any fetch', async () => {
+    const { result, fetchFn } = await openWith(await wholeKeyGrant(), accessKey(), makeShare)
+    expect(result).toBeInstanceOf(NotAShareError)
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+})
+
+describe('link payload', () => {
   it('opens a share of an upload written under a group (add --group): the link holds only that piece', async () => {
     const stub = serveRange(await makeShare(folder, { group: 'team/design' }))
     const payload = await plainGrant({ group: 'team/design' })
@@ -308,17 +346,6 @@ describe('link payload', () => {
   })
 
   it.each([
-    ['a plain grant', plainGrant],
-    ['a Delivery', delivery],
-  ])('refuses a wrong Access key for %s before any fetch, and zeroes it', async (_, make) => {
-    const key = accessKey(OTHER_T)
-    const { result, fetchFn } = await openWith(await make(), key)
-    expect(result).toBeInstanceOf(WrongAccessKeyError)
-    expect(fetchFn).not.toHaveBeenCalled()
-    expectSameBytes(key, new Uint8Array(32))
-  })
-
-  it.each([
     ['zero', new Uint8Array(32)],
     ['the group order', hexToBytes(`0x${N}`)],
   ])('refuses an Access key that is not a valid private key (%s) before any fetch', async (_, key) => {
@@ -327,27 +354,8 @@ describe('link payload', () => {
     expect(fetchFn).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['a plain grant', plainGrant],
-    ['a Delivery', delivery],
-  ])("refuses %s for upload A against upload B's envelope as another upload", async (_, make) => {
-    const { result, fetchFn } = await openWith(await make({ salt: OTHER_SALT }))
-    expect(result).toBeInstanceOf(OtherUploadError)
-    expect(fetchFn).toHaveBeenCalled()
-  })
-
-  it('refuses an expired Delivery before any fetch', async () => {
-    const expires = Math.floor(Date.now() / 1000) - 3600
-    const { result, fetchFn } = await openWith(await delivery({ expires }))
-    expect(result).toBeInstanceOf(ShareExpiredError)
-    expect(fetchFn).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    ['the whole group key', groupKeyGrant],
-    ['a group', groupGrant],
-  ])('refuses a grant for %s, which is not a Share link, before any fetch', async (_case, make) => {
-    const { result, fetchFn } = await openWith(await make())
+  it('refuses a grant for a group, which is not a Share link, before any fetch', async () => {
+    const { result, fetchFn } = await openWith(await groupGrant())
     expect(result).toBeInstanceOf(NotAShareError)
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -665,35 +673,9 @@ describe('archive lifetime', () => {
   })
 })
 
-describe('format 1 links (filecoin-pin 2.3, 2.4: keysmith 0.1.0)', () => {
-  async function openV1(payload: Uint8Array, share: Uint8Array) {
-    const stub = serveRange(share)
-    const fetchFn = vi.fn(stub.fetch)
-    const result = await openProtectedArchive(CID_STRING, payload, accessKey(), fetchFn).catch(
-      (cause: unknown) => cause
-    )
-    return { result, fetchFn }
-  }
-
-  it.each([
-    ['a plain grant', plainGrantV1],
-    ['a Delivery', () => deliveryV1()],
-  ])('still open with %s', async (_, make) => {
-    const { result } = await openV1(await make(), await makeShareV1(folder))
-    expect((result as ProtectedArchive).list()).toHaveLength(4)
-  })
-
-  it('refuses an expired format 1 Delivery before any fetch', async () => {
-    const { result, fetchFn } = await openV1(
-      await deliveryV1({ expires: Math.floor(Date.now() / 1000) - 3600 }),
-      await makeShareV1(folder)
-    )
-    expect(result).toBeInstanceOf(ShareExpiredError)
-    expect(fetchFn).not.toHaveBeenCalled()
-  })
-
+describe('format 1 and format 2 together', () => {
   it('opens only an upload of its own format: a link of one format for the other is not a share', async () => {
-    expect((await openV1(await plainGrantV1(), await makeShare(folder))).result).toBeInstanceOf(NotAShareError)
-    expect((await openV1(await plainGrant(), await makeShareV1(folder))).result).toBeInstanceOf(NotAShareError)
+    expect((await openWith(await plainGrantV1())).result).toBeInstanceOf(NotAShareError)
+    expect((await openWith(await plainGrant(), accessKey(), makeShareV1)).result).toBeInstanceOf(NotAShareError)
   })
 })
