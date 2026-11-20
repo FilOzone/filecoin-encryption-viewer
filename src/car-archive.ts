@@ -5,12 +5,14 @@ import {
   keyForEnvelope,
   openDelivery,
   publicKeyOf,
+  readPieceMetadata,
   unwrapWith,
 } from '@filoz/keysmith'
 import { decode as decodeCbor } from '@ipld/dag-cbor'
 import * as fee from 'filecoin-encryption-envelope'
+import * as KeysmithV1 from 'keysmith-v1'
 import { CID } from 'multiformats/cid'
-import { bytesToHex } from 'viem'
+import { type Hex, bytesToHex } from 'viem'
 import {
   DamagedLinkError,
   NotAShareError,
@@ -86,10 +88,22 @@ export async function openProtectedArchive(
   accessKey: Uint8Array,
   fetchFn: typeof fetch = fetch
 ): Promise<ProtectedArchive> {
-  let opened: { key: Uint8Array; grant: Grant }
+  return formatOf(payload) === 1
+    ? openWith(FORMAT_1, cid, payload, accessKey, fetchFn)
+    : openWith(FORMAT_2, cid, payload, accessKey, fetchFn)
+}
+
+async function openWith<G extends { node: string }>(
+  format: KeysmithFormat<G>,
+  cid: string,
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  fetchFn: typeof fetch
+): Promise<ProtectedArchive> {
+  let opened: { key: Uint8Array; grant: G }
   try {
     if (!CID_PATTERN.test(cid)) throw new Error('Invalid encrypted Root CID')
-    opened = await openPayload(payload, accessKey)
+    opened = await openPayload(payload, accessKey, format)
   } finally {
     accessKey.fill(0)
   }
@@ -104,7 +118,7 @@ export async function openProtectedArchive(
     if (info.scheme !== 'chunked' || info.contentType !== CAR_CONTENT_TYPE || !info.params.plaintextLength) {
       throw new NotAShareError()
     }
-    key = pieceKeyFor(nodeKey, info.appMetadata, opened.grant)
+    key = pieceKeyFor(nodeKey, info.appMetadata, opened.grant, format)
     nodeKey.fill(0)
     nodeKey = undefined
     // From here the archive owns the key; close() zeroes it
@@ -123,8 +137,65 @@ export async function openProtectedArchive(
 const DELIVERY = 4
 const GRANT = 5
 
+/**
+ * What the viewer needs from one keysmith format. Format 2 is current keysmith; format 1 is keysmith 0.1.0, which
+ * filecoin-pin 2.3 and 2.4 use, so links they make keep opening. The two differ in how an expired Delivery is reported
+ * (0.1.0 throws "The chain expired at"; 0.2.0 opens it and says `expired`) and in the envelope labels each reads.
+ * ponytail: drop format 1 (this adapter, the keysmith-v1 alias and its tests) once 0.1.0 links have aged out.
+ */
+interface KeysmithFormat<G extends { node: string }> {
+  decodeGrant(payload: Uint8Array): G
+  decodeDelivery(payload: Uint8Array): { grant: G }
+  unwrapWith(T: Hex, grant: G): Promise<Uint8Array>
+  openDelivery(T: Hex, payload: Uint8Array): Promise<{ key: Uint8Array; grant: G; expired: boolean }>
+  /** Whether the envelope's labels are this format's: a link only opens an upload of its own format. */
+  isLabels(metadata: Record<string, unknown>): boolean
+  keyForEnvelope(nodeKey: Uint8Array, metadata: Record<string, unknown>, grant: G): Uint8Array
+}
+
+const FORMAT_2: KeysmithFormat<Grant> = {
+  decodeGrant,
+  decodeDelivery,
+  unwrapWith,
+  openDelivery,
+  isLabels(metadata) {
+    try {
+      readPieceMetadata(metadata)
+      return true
+    } catch {
+      return false
+    }
+  },
+  keyForEnvelope,
+}
+
+const FORMAT_1: KeysmithFormat<KeysmithV1.Grant> = {
+  decodeGrant: KeysmithV1.decodeGrant,
+  decodeDelivery: KeysmithV1.decodeDelivery,
+  unwrapWith: KeysmithV1.unwrapWith,
+  // 0.1.0 refuses an expired chain itself, with the message deliveryError knows
+  openDelivery: async (T, payload) => ({ ...(await KeysmithV1.openDelivery(T, payload)), expired: false }),
+  isLabels: (metadata) => metadata['foc/v'] === 1 && typeof metadata['foc/ks'] === 'string',
+  keyForEnvelope: KeysmithV1.keyForEnvelope,
+}
+
+/**
+ * The keysmith format a payload was made with, read before anything is fetched: a Delivery is `[v, chain, grant]`, a
+ * plain grant a map whose first key, 0, is `v`. Anything else is format 2, whose decoders say what is wrong with it.
+ */
+function formatOf(payload: Uint8Array): 1 | 2 {
+  let version: number | undefined
+  if (payload[0] >> 5 === DELIVERY) version = payload[1]
+  else if (payload[0] >> 5 === GRANT && payload[1] === 0x00) version = payload[2]
+  return version === 1 ? 1 : 2
+}
+
 /** The piece's node key and the grant naming it. Every failure here happens before any request. */
-async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<{ key: Uint8Array; grant: Grant }> {
+async function openPayload<G extends { node: string }>(
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  format: KeysmithFormat<G>
+): Promise<{ key: Uint8Array; grant: G }> {
   // ponytail: T's hex string can't be zeroed; only its bytes are
   const T = bytesToHex(accessKey)
   try {
@@ -134,33 +205,40 @@ async function openPayload(payload: Uint8Array, accessKey: Uint8Array): Promise<
   }
 
   const kind = payload[0] >> 5
-  let grant: Grant
+  let grant: G
   try {
-    if (kind === DELIVERY) grant = decodeDelivery(payload).grant
-    else if (kind === GRANT) grant = decodeGrant(payload)
+    if (kind === DELIVERY) grant = format.decodeDelivery(payload).grant
+    else if (kind === GRANT) grant = format.decodeGrant(payload)
     else throw new Error('Neither a Delivery nor a grant')
   } catch (cause) {
     throw new DamagedLinkError('The link payload is not a keysmith grant or Delivery', { cause })
   }
-  // A keyspace or scope grant opens more than one upload: a Share link never carries one
+  // A grant for a whole group key or a group opens more than one upload: a Share link never carries one
   if (!grant.node.startsWith('piece:')) throw new NotAShareError()
 
   if (kind === GRANT) {
     try {
-      return { key: await unwrapWith(T, grant), grant }
+      return { key: await format.unwrapWith(T, grant), grant }
     } catch (cause) {
       throw new WrongAccessKeyError('The Access key does not open this grant', { cause })
     }
   }
+  let opened: Awaited<ReturnType<KeysmithFormat<G>['openDelivery']>>
   try {
-    const { key, grant: named } = await openDelivery(T, payload)
-    return { key, grant: named }
+    opened = await format.openDelivery(T, payload)
   } catch (cause) {
     throw deliveryError(cause)
   }
+  // keysmith opens an expired chain and says so (its expiry limits fetching from a gating provider, not the key);
+  // a share's expiry is what its sender set, so the viewer still refuses it
+  if (opened.expired) {
+    opened.key.fill(0)
+    throw new ShareExpiredError('The share has expired')
+  }
+  return { key: opened.key, grant: opened.grant }
 }
 
-// openDelivery throws plain Errors; these messages are keysmith 0.1.0's (claims.ts verifyChain and openDelivery).
+// openDelivery throws plain Errors; these messages are keysmith's (claims.ts verifyChain and openDelivery).
 // Anything else is a damaged link: a bad signature, or a grant that doesn't unwrap or match its commitment even though
 // the chain names this key as its bearer.
 function deliveryError(cause: unknown): Error {
@@ -172,12 +250,20 @@ function deliveryError(cause: unknown): Error {
   return new DamagedLinkError('The Delivery does not verify', { cause })
 }
 
-/** keyForEnvelope checks the envelope's owner, keyspace and salt against the grant. */
-function pieceKeyFor(nodeKey: Uint8Array, appMetadata: fee.AppMetadata | undefined, grant: Grant): Uint8Array {
+/**
+ * keyForEnvelope checks the envelope's owner, group key and salt against the grant. Only labels of the link's own
+ * keysmith format are a share: a link of one format for an upload of the other is not.
+ */
+function pieceKeyFor<G extends { node: string }>(
+  nodeKey: Uint8Array,
+  appMetadata: fee.AppMetadata | undefined,
+  grant: G,
+  format: KeysmithFormat<G>
+): Uint8Array {
   const metadata = (appMetadata ?? {}) as Record<string, unknown>
-  if (metadata['foc/v'] !== 1 || typeof metadata['foc/ks'] !== 'string') throw new NotAShareError()
+  if (!format.isLabels(metadata)) throw new NotAShareError()
   try {
-    return keyForEnvelope(nodeKey, metadata, grant)
+    return format.keyForEnvelope(nodeKey, metadata, grant)
   } catch (cause) {
     throw new OtherUploadError('The link is for another upload', { cause })
   }
