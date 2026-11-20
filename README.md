@@ -81,9 +81,9 @@ The viewer accepts `d` then `k` in that order, `d` up to 8192 characters, and no
 
 With `k`, the viewer clears it from the address bar (keeping `d`) before it fetches anything, so a reload or a copy of the address no longer carries the key, then opens the share with no prompt. The history entry records only that a key was removed, so a reload asks for the Access key with a notice saying why. If the key doesn't work it falls back to the prompt with a notice. Another link opened in the same tab (pasted, or by Back and Forward) closes the open share first, zeroing its keys, and its unfinished work never reaches the page. Without `k`, it asks for the Access key and checks the pasted text first: whitespace is dropped, and a group key Grant (`fgr1_…`), a Share link, text without `fak1_` or a key of the wrong length is refused with its own message before anything else happens.
 
-1. **Open the payload, before any request.** A Delivery goes through keysmith's `openDelivery` (chain signatures, expiry, T as the bearer, the key commitment, the grant naming the claim). A plain grant is unwrapped with `unwrapWith`. The grant must name one piece (`piece:<salt>`); a keyspace or scope grant is refused. A wrong Access key fails here, with nothing fetched.
+1. **Open the payload, before any request.** A Delivery goes through keysmith's `openDelivery` (chain signatures, expiry, T as the bearer, the key commitment, the grant naming the claim). A plain grant is unwrapped with `unwrapWith`. The grant must name one piece (`piece:<salt>`); a grant for a whole group key or a group is refused. A wrong Access key fails here, with nothing fetched.
 2. **Read the envelope header** with Range requests: a chunked FEE envelope of a CAR.
-3. **Derive the piece key** with `keyForEnvelope`, which checks the envelope's keysmith labels (owner, keyspace, salt) against the grant. The node key and T's bytes are zeroed once used; the piece key is zeroed when the share is closed, or on any failure.
+3. **Derive the piece key** with `keyForEnvelope`, which checks the envelope's keysmith labels (owner, group key, salt) against the grant. The node key and T's bytes are zeroed once used; the piece key is zeroed when the share is closed, or on any failure.
 4. **Read files** with `decryptRange`.
 
 | Case | Message |
@@ -99,6 +99,12 @@ No message names anything from inside the envelope.
 
 The viewer fetches `https://<encrypted-root-cid>.ipfs.inbrowser.link/` with HTTP Range requests. inbrowser.link's service worker intercepts that request (the host is never reached directly) and serves it from the storage providers through IPNI, so the viewer only works when opened at an inbrowser.link origin. A share opened before IPNI has caught up shows "not available yet".
 
+### Private uploads
+
+A private upload (`filecoin-pin add --private`) is not served on open paths, so the gateway can't fetch it. Its link carries a Delivery whose final claim names the piece (its CID as the claim's locator) and is borne by T, and `&s=` lists the providers that hold it (comma-separated, URI-encoded http(s) URLs). The viewer signs one read request with T and fetches `<provider>/download/<piece-cid>?foc_grant=<token>` from each provider in turn: the query form, not an `Authorization` header, so the request needs no CORS preflight. Providers don't expose `Content-Range` to scripts, so the piece is fetched whole (up to the in-memory cap), every block is checked against its CID, and `encrypted.fee` is reassembled from the link's root CID. This is why `connect-src` allows `https:`.
+
+A session key's link delegates the piece from its group Grant, and keysmith can verify such a chain only with the piece's labels, which are inside the piece. The viewer doesn't verify it: the provider's gate does, against the real labels, and the key is checked by `keyForEnvelope` and FEE. It still checks that T is the bearer and that the chain hasn't expired. An owner's link (one root claim) is verified as before.
+
 ## Encryption format
 
 The format is defined by filecoin-pin `add --encrypt`:
@@ -111,10 +117,10 @@ outer CAR (public, IPNI)  ── UnixFS file, root = Encrypted root CID
 ```
 
 - The envelope's `content_type` is `application/vnd.ipld.car`. The inner CAR lists every directory and file node before any file data, so the viewer knows the whole tree, and every file's byte ranges, from the first few hundred KB.
-- The envelope's authenticated `appMetadata` holds keysmith's piece labels (`pieceMetadata`): `foc/v` (1), `foc/own`, `foc/ks`, optionally `foc/scope`, and `foc/salt`. The piece key is derived from the keyspace key and the salt, so every upload has its own key, and a Share link opens only its own upload.
+- The envelope's authenticated `appMetadata` holds keysmith's piece labels (`pieceMetadata`, keysmith format 2): `foc/v` (2), `foc/own`, `foc/gkid`, optionally `foc/group`, and `foc/salt`. The piece key is derived from the group key (through the group, if any) and the salt, so every upload has its own key, and a Share link opens only its own upload, whatever group it is in. Links from filecoin-pin 2.3 and 2.4 (keysmith 0.1.0, format 1: `foc/v` 1, `foc/ks`) still open: the payload names its format before anything is fetched, and that format's keysmith reads it. A link of one format never opens an upload of the other.
 - File and folder names exist only inside the ciphertext. The on-chain piece name is `encrypted.fee`.
 
-Key handling is [`@filoz/keysmith`](https://www.npmjs.com/package/@filoz/keysmith) 0.1.0 (with `viem`).
+Key handling is [`@filoz/keysmith`](https://www.npmjs.com/package/@filoz/keysmith) (with `viem`), plus keysmith 0.1.0 under the `keysmith-v1` alias for format 1 links.
 
 ## Content rendering
 

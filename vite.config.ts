@@ -21,7 +21,8 @@ function devHarness(): Plugin {
             'script-src': "'self'",
             'font-src': "'self'",
             'img-src': "'self'",
-            'connect-src': 'ws:',
+            // http:: a local foc-devnet's providers, for private shares; production allows https: only
+            'connect-src': 'ws: http:',
           }
           const relaxed = Object.entries(extra).reduce(
             (policy, [directive, sources]) => policy.replace(new RegExp(`${directive} `), `${directive} ${sources} `),
