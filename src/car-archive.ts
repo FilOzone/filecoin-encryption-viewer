@@ -93,8 +93,20 @@ export async function openProtectedArchive(
   fetchFn: typeof fetch = fetch,
   providers: readonly string[] = []
 ): Promise<ProtectedArchive> {
-  let opened: { key: Uint8Array; grant: Grant; chain?: ClaimChain }
-  const format = formatOf(payload)
+  return formatOf(payload) === 1
+    ? openWith(FORMAT_1, cid, payload, accessKey, fetchFn, providers)
+    : openWith(FORMAT_2, cid, payload, accessKey, fetchFn, providers)
+}
+
+async function openWith<G extends { node: string }>(
+  format: KeysmithFormat<G>,
+  cid: string,
+  payload: Uint8Array,
+  accessKey: Uint8Array,
+  fetchFn: typeof fetch,
+  providers: readonly string[]
+): Promise<ProtectedArchive> {
+  let opened: { key: Uint8Array; grant: G; chain?: ClaimChain }
   // A private upload (its link's final claim names its piece): where to fetch it, and the signed request to present
   let gated: { pieceCid: CID; token: string } | undefined
   try {
@@ -151,24 +163,28 @@ const GRANT = 5
  * (0.1.0 throws "The chain expired at"; 0.2.0 opens it and says `expired`) and in the envelope labels each reads.
  * ponytail: drop format 1 (this adapter, the keysmith-v1 alias and its tests) once 0.1.0 links have aged out.
  */
-interface KeysmithFormat {
-  decodeGrant(payload: Uint8Array): Grant
-  decodeDelivery(payload: Uint8Array): { grant: Grant }
-  unwrapWith(T: Hex, grant: Grant): Promise<Uint8Array>
+interface KeysmithFormat<G extends { node: string }> {
+  decodeGrant(payload: Uint8Array): G
+  decodeDelivery(payload: Uint8Array): { grant: G }
+  unwrapWith(T: Hex, grant: G): Promise<Uint8Array>
+  /** The chain only in format 2: a private upload's link (one whose final claim names its piece) is never format 1. */
   openDelivery(
     T: Hex,
     payload: Uint8Array
-  ): Promise<{ key: Uint8Array; grant: Grant; chain: ClaimChain; expired: boolean }>
+  ): Promise<{ key: Uint8Array; grant: G; chain?: ClaimChain; expired: boolean }>
+  /** Format 2 only: a Delivery opened without verifying its chain (see openPayload). */
+  openUnverified?(T: Hex, payload: Uint8Array): Promise<{ key: Uint8Array; grant: G; chain: ClaimChain }>
   /** Whether the envelope's labels are this format's: a link only opens an upload of its own format. */
   isLabels(metadata: Record<string, unknown>): boolean
-  keyForEnvelope(nodeKey: Uint8Array, metadata: Record<string, unknown>, grant: Grant): Uint8Array
+  keyForEnvelope(nodeKey: Uint8Array, metadata: Record<string, unknown>, grant: G): Uint8Array
 }
 
-const FORMAT_2: KeysmithFormat = {
+const FORMAT_2: KeysmithFormat<Grant> = {
   decodeGrant,
   decodeDelivery,
   unwrapWith,
   openDelivery,
+  openUnverified,
   isLabels(metadata) {
     try {
       readPieceMetadata(metadata)
@@ -180,37 +196,39 @@ const FORMAT_2: KeysmithFormat = {
   keyForEnvelope,
 }
 
-const FORMAT_1: KeysmithFormat = {
-  decodeGrant: (payload) => KeysmithV1.decodeGrant(payload) as never,
-  decodeDelivery: (payload) => KeysmithV1.decodeDelivery(payload) as never,
-  unwrapWith: (T, grant) => KeysmithV1.unwrapWith(T, grant as never),
+const FORMAT_1: KeysmithFormat<KeysmithV1.Grant> = {
+  decodeGrant: KeysmithV1.decodeGrant,
+  decodeDelivery: KeysmithV1.decodeDelivery,
+  unwrapWith: KeysmithV1.unwrapWith,
   // 0.1.0 refuses an expired chain itself, with the message deliveryError knows
-  openDelivery: async (T, payload) => ({ ...(await KeysmithV1.openDelivery(T, payload)), expired: false }) as never,
+  openDelivery: async (T, payload) => {
+    const { key, grant } = await KeysmithV1.openDelivery(T, payload)
+    return { key, grant, expired: false }
+  },
   isLabels: (metadata) => metadata['foc/v'] === 1 && typeof metadata['foc/ks'] === 'string',
-  keyForEnvelope: (nodeKey, metadata, grant) => KeysmithV1.keyForEnvelope(nodeKey, metadata as never, grant as never),
+  keyForEnvelope: KeysmithV1.keyForEnvelope,
 }
 
 /**
  * The keysmith format a payload was made with, read before anything is fetched: a Delivery is `[v, chain, grant]`, a
  * plain grant a map whose first key, 0, is `v`. Anything else is format 2, whose decoders say what is wrong with it.
  */
-function formatOf(payload: Uint8Array): KeysmithFormat {
+function formatOf(payload: Uint8Array): 1 | 2 {
   let version: number | undefined
   if (payload[0] >> 5 === DELIVERY) version = payload[1]
   else if (payload[0] >> 5 === GRANT && payload[1] === 0x00) version = payload[2]
-  if (version === 1) return FORMAT_1
-  return FORMAT_2
+  return version === 1 ? 1 : 2
 }
 
 /**
  * The piece's node key and the grant naming it, and for a Delivery its claim chain. Every failure here happens before
  * any request.
  */
-async function openPayload(
+async function openPayload<G extends { node: string }>(
   payload: Uint8Array,
   accessKey: Uint8Array,
-  format: KeysmithFormat
-): Promise<{ key: Uint8Array; grant: Grant; chain?: ClaimChain }> {
+  format: KeysmithFormat<G>
+): Promise<{ key: Uint8Array; grant: G; chain?: ClaimChain }> {
   // ponytail: T's hex string can't be zeroed; only its bytes are
   const T = bytesToHex(accessKey)
   try {
@@ -220,7 +238,7 @@ async function openPayload(
   }
 
   const kind = payload[0] >> 5
-  let grant: Grant
+  let grant: G
   try {
     if (kind === DELIVERY) grant = format.decodeDelivery(payload).grant
     else if (kind === GRANT) grant = format.decodeGrant(payload)
@@ -238,15 +256,19 @@ async function openPayload(
       throw new WrongAccessKeyError('The Access key does not open this grant', { cause })
     }
   }
-  let opened: Awaited<ReturnType<KeysmithFormat['openDelivery']>>
+  let opened: Awaited<ReturnType<KeysmithFormat<G>['openDelivery']>>
   try {
     opened = await format.openDelivery(T, payload)
   } catch (cause) {
     // A chain that narrows a group to a piece (a session key's share of a private upload) can only be verified with
     // the piece's labels, which are inside the piece the chain is needed to fetch. The viewer doesn't need to verify
     // it: the provider's gate does, against the real labels, and the key is checked by keyForEnvelope and FEE.
-    if (cause instanceof Error && cause.message.includes("checking it needs the piece's labels")) {
-      return openUnverified(T, payload)
+    if (
+      format.openUnverified &&
+      cause instanceof Error &&
+      cause.message.includes("checking it needs the piece's labels")
+    ) {
+      return format.openUnverified(T, payload)
     }
     throw deliveryError(cause)
   }
@@ -293,11 +315,11 @@ function deliveryError(cause: unknown): Error {
  * keyForEnvelope checks the envelope's owner, group key and salt against the grant. Only labels of the link's own
  * keysmith format are a share: a link of one format for an upload of the other is not.
  */
-function pieceKeyFor(
+function pieceKeyFor<G extends { node: string }>(
   nodeKey: Uint8Array,
   appMetadata: fee.AppMetadata | undefined,
-  grant: Grant,
-  format: KeysmithFormat
+  grant: G,
+  format: KeysmithFormat<G>
 ): Uint8Array {
   const metadata = (appMetadata ?? {}) as Record<string, unknown>
   if (!format.isLabels(metadata)) throw new NotAShareError()
