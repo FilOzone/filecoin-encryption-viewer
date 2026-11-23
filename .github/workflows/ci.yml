@@ -37,7 +37,7 @@ jobs:
       # No wallet and no secrets, so fork PRs run it too: packs dist/ as a release would and reports its root CID.
       - name: Dry-run publish
         id: webmaster
-        uses: FilOzone/filoz-webmaster@5aa0da17c4e30e23601826cbeeaba203a451c031 # FilOzone/filoz-webmaster#3
+        uses: FilOzone/filoz-webmaster@33e6c2b65b92221bd8cf6d90c57962c83f3cbb9a # main
         with:
           path: dist
           dry-run: "true"
