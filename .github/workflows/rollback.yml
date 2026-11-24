@@ -1,0 +1,59 @@
+name: Rollback
+
+# Points https://viewer.filecoin.cloud/ at an earlier build from README.md's Verifiable build table.
+on:
+  workflow_dispatch:
+    inputs:
+      cid:
+        description: Viewer CID from README.md's Verifiable build table (bafy… or bafkrei…)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    # Shared with the Release workflow's dnslink job: one DNSLink change at a time. A newer queued run replaces an older
+    # queued one, which then never starts, so the viewer is left as it was, never half-switched.
+    concurrency:
+      group: dnslink
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # Runtime dependencies only, and no lifecycle scripts next to the Cloudflare token.
+      - run: pnpm install --frozen-lockfile --prod --ignore-scripts
+
+      - name: Check the CID is a recorded, indexed build
+        env:
+          CID: ${{ inputs.cid }}
+        run: |
+          node scripts/release.ts readme-has "$CID"
+          node scripts/release.ts wait-indexed "$CID" 5
+
+      - name: Point the DNSLink at the CID
+        env:
+          CID: ${{ inputs.cid }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          DNSLINK_RECORD_ID: ${{ vars.DNSLINK_RECORD_ID }}
+        run: |
+          previous="$(node scripts/release.ts dnslink-set "$CID")"
+          echo "Pointed the viewer at \`$CID\` (was \`${previous:-none}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the DNSLink and the redirect
+        env:
+          CID: ${{ inputs.cid }}
+        run: node scripts/release.ts dnslink-verify "$CID"
