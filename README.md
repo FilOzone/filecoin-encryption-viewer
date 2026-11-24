@@ -199,7 +199,7 @@ The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-f
 
 1. Each push to `main` updates a release PR (version bump and changelog), and CI commits that build's CID to the table below, keyed by the upcoming tag. Release PRs are opened with `GITHUB_TOKEN`, so GitHub runs no CI checks on them.
 2. Merging the release PR tags the release. CI runs the checks on the released commit, builds it, and fails if its CID differs from the table. A release deploys only when it changes the viewer, that is, when its CID differs from the previous row; a rollback stays until then.
-3. CI uploads that build to mainnet with the release wallet. A maintainer then approves the DNSLink switch: CI waits until [cid.contact](https://cid.contact) indexes the CID and points the DNSLink record at it. The release notes record the new and the previous CID.
+3. CI uploads that build to mainnet with the release wallet `0x97ce47f23068C1F1B26e0BF73433FCF2Fc71bca0`. A maintainer then approves the DNSLink switch: CI waits until [cid.contact](https://cid.contact) indexes the CID and points the DNSLink record at it. The release notes record the new and the previous CID.
 
 | Release | Viewer CID | Network |
 |---|---|---|

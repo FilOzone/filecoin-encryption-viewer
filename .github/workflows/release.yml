@@ -168,6 +168,7 @@ jobs:
         uses: FilOzone/filoz-webmaster@33e6c2b65b92221bd8cf6d90c57962c83f3cbb9a # main
         with:
           path: dist
+          # The release wallet, 0x97ce47f23068C1F1B26e0BF73433FCF2Fc71bca0; its key is the `upload` environment's secret.
           private-key: ${{ secrets.FILECOIN_WALLET_KEY }}
           network: mainnet
 
