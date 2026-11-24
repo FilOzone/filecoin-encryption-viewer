@@ -1,6 +1,6 @@
 {
   "name": "filecoin-encryption-viewer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Single-file browser viewer for encrypted filecoin-pin shares",
   "type": "module",
   "private": true,

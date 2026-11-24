@@ -204,6 +204,7 @@ The stable URL **https://viewer.filecoin.cloud/** redirects to `https://viewer-f
 | Release | Viewer CID | Network |
 |---|---|---|
 | `0a0b8b5` | `bafkreif2klvyz4fol7wvbsbv5e5uwj2dkjt5znaiudzll2ribl6u4hgi64` | mainnet |
+| `v0.2.0` | `bafybeigcgrecgdj43oxpqyosssb3vrm2jxyse6zql6h52qrjvrkcox6or4` | mainnet |
 
 The `0a0b8b5` row predates releases, so it names a commit. To point the stable URL back at a recorded build, run the **Rollback** workflow with its CID.
 
